@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=openpaint
+GenericName=Image Editor
+Comment=Edit images with layers, drawing tools, and effects
+Exec=openpaint %F
+Icon=openpaint
+Terminal=false
+Categories=Graphics;2DGraphics;RasterGraphics;
+MimeType=application/x-openpaint;image/png;image/bmp;image/x-tga;image/x-icon;image/webp;image/x-portable-pixmap;
+StartupWMClass=openpaint
+Keywords=paint;image;drawing;layers;

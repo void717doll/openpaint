@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.openpaint.OpenPaint</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>openpaint</name>
+  <summary>Edit images with layers, drawing tools, and effects</summary>
+  <description>
+    <p>A native raster image editor with layers, selections, drawing tools, image adjustments, and undo history.</p>
+  </description>
+  <launchable type="desktop-id">org.openpaint.OpenPaint.desktop</launchable>
+  <provides>
+    <binary>openpaint</binary>
+    <mediatype>application/x-openpaint</mediatype>
+    <mediatype>image/png</mediatype>
+    <mediatype>image/bmp</mediatype>
+  </provides>
+  <content_rating type="oars-1.1"/>
+</component>
