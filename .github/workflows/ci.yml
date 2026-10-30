@@ -1,0 +1,77 @@
+name: checks
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            executable: openpaint
+            rustflags: ""
+          - runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            executable: openpaint.exe
+            rustflags: "-C target-feature=+crt-static"
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            executable: openpaint
+            rustflags: ""
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            executable: openpaint
+            rustflags: ""
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      RUSTUP_TOOLCHAIN: stable
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: install rust tools
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup target add --toolchain stable "${{ matrix.target }}"
+      - name: check formatting
+        run: cargo +stable fmt --all -- --check
+      - name: lint
+        run: cargo +stable clippy --locked --all-targets --target "${{ matrix.target }}" -- -D warnings
+      - name: test
+        run: cargo +stable test --locked --target "${{ matrix.target }}"
+      - name: build
+        run: cargo +stable build --locked --release --target "${{ matrix.target }}"
+      - name: check command line
+        run: |
+          "target/${{ matrix.target }}/release/${{ matrix.executable }}" --version
+          "target/${{ matrix.target }}/release/${{ matrix.executable }}" --help
+          python scripts/release.py version
+          python -m py_compile scripts/package.py scripts/release.py scripts/licenses.py
+      - name: check linux metadata
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y desktop-file-utils appstream
+          desktop-file-validate packaging/org.openpaint.OpenPaint.desktop
+          appstreamcli validate --no-net --override=url-homepage-missing=info packaging/org.openpaint.OpenPaint.metainfo.xml

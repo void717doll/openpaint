@@ -1,0 +1,10 @@
+/target/
+/dist/
+/analysis/
+/*.exe
+/*.opaint
+/*.opaint.tmp
+*.log
+.DS_Store
+__pycache__/
+*.pyc
