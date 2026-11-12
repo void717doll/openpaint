@@ -1,0 +1,164 @@
+[
+  {
+    "community": 0,
+    "label": "interface rendering and panels",
+    "nodes": 91,
+    "cohesion": 0.06984126984126984
+  },
+  {
+    "community": 1,
+    "label": "editor input and jobs",
+    "nodes": 82,
+    "cohesion": 0.06142728093947606
+  },
+  {
+    "community": 2,
+    "label": "drawing and selection tools",
+    "nodes": 68,
+    "cohesion": 0.07682177348551361
+  },
+  {
+    "community": 3,
+    "label": "documents layers and history",
+    "nodes": 66,
+    "cohesion": 0.08251748251748252
+  },
+  {
+    "community": 4,
+    "label": "interface action dispatch",
+    "nodes": 46,
+    "cohesion": 0.043478260869565216
+  },
+  {
+    "community": 5,
+    "label": "architecture parity and reference",
+    "nodes": 44,
+    "cohesion": 0.06342494714587738
+  },
+  {
+    "community": 6,
+    "label": "packaging and release scripts",
+    "nodes": 42,
+    "cohesion": 0.13821138211382114
+  },
+  {
+    "community": 7,
+    "label": "continuous integration checks",
+    "nodes": 40,
+    "cohesion": 0.05
+  },
+  {
+    "community": 8,
+    "label": "project files and saves",
+    "nodes": 37,
+    "cohesion": 0.0990990990990991
+  },
+  {
+    "community": 9,
+    "label": "adjustments and effects",
+    "nodes": 33,
+    "cohesion": 0.16098484848484848
+  },
+  {
+    "community": 10,
+    "label": "tool selection catalog",
+    "nodes": 24,
+    "cohesion": 0.08333333333333333
+  },
+  {
+    "community": 11,
+    "label": "layer blend modes",
+    "nodes": 18,
+    "cohesion": 0.11764705882352941
+  },
+  {
+    "community": 12,
+    "label": "unicode text editing",
+    "nodes": 25,
+    "cohesion": 0.15666666666666668
+  },
+  {
+    "community": 13,
+    "label": "menus and commands",
+    "nodes": 14,
+    "cohesion": 0.18681318681318682
+  },
+  {
+    "community": 14,
+    "label": "release workflow triggers",
+    "nodes": 11,
+    "cohesion": 0.18181818181818182
+  },
+  {
+    "community": 15,
+    "label": "release platform matrix",
+    "nodes": 10,
+    "cohesion": 0.2
+  },
+  {
+    "community": 16,
+    "label": "release signing configuration",
+    "nodes": 9,
+    "cohesion": 0.2222222222222222
+  },
+  {
+    "community": 17,
+    "label": "release artifact transfers",
+    "nodes": 9,
+    "cohesion": 0.2222222222222222
+  },
+  {
+    "community": 19,
+    "label": "release environment settings",
+    "nodes": 8,
+    "cohesion": 0.25
+  },
+  {
+    "community": 20,
+    "label": "package job configuration",
+    "nodes": 7,
+    "cohesion": 0.2857142857142857
+  },
+  {
+    "community": 21,
+    "label": "release publication permissions",
+    "nodes": 7,
+    "cohesion": 0.2857142857142857
+  },
+  {
+    "community": 22,
+    "label": "release job steps",
+    "nodes": 7,
+    "cohesion": 0.38095238095238093
+  },
+  {
+    "community": 23,
+    "label": "application icon artwork",
+    "nodes": 5,
+    "cohesion": 0.5
+  },
+  {
+    "community": 24,
+    "label": "modal input actions",
+    "nodes": 5,
+    "cohesion": 0.4
+  },
+  {
+    "community": 25,
+    "label": "appimage startup wrapper",
+    "nodes": 3,
+    "cohesion": 0.6666666666666666
+  },
+  {
+    "community": 26,
+    "label": "cargo package manifest",
+    "nodes": 1,
+    "cohesion": 1.0
+  },
+  {
+    "community": 27,
+    "label": "library module exports",
+    "nodes": 1,
+    "cohesion": 1.0
+  }
+]

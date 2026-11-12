@@ -1,0 +1,41 @@
+[graphify] MultiDiGraph edge-collapse diagnostic
+input: <in-memory>
+input_stage: provided JSON (normal graph.json is post-build)
+effective_directed: <direct-call>
+nodes: 673
+unverified_code_nodes: 0
+raw_edges: 1707
+valid_candidate_edges: 1605
+missing_endpoint_edges: 0
+dangling_endpoint_edges: 102
+external_reference_edges: 0
+self_loop_edges: 0
+exact_duplicate_edges: 6
+directed_unique_endpoint_pairs: 1508
+directed_same_endpoint_collapsed_edges: 97
+undirected_unique_endpoint_pairs: 1507
+undirected_same_endpoint_collapsed_edges: 98
+same_endpoint_group_count: 40
+relation_variant_groups: 0
+source_file_variant_groups: 1
+source_location_variant_groups: 31
+context_variant_groups: 5
+post_build_graph_type: Graph
+post_build_edges: 1604
+producer_suppression_sites: 12
+producer_suppression_examples:
+  - L1887 seen_ids arity=unknown
+  - L2582 seen_ids arity=unknown
+  - L2584 seen_doc_refs arity=unknown
+  - L3251 seen_ids arity=unknown
+  - L3398 seen_ids arity=unknown
+  - L4812 seen_keys arity=unknown
+  - L4998 seen_keys arity=unknown
+  - L9409 seen_ids arity=unknown
+examples:
+  - github_workflows_release_package_steps -> github_workflows_release_steps_name edges=9 relations=['contains'] locations=['L63', 'L65', 'L69', 'L74', 'L77', 'L79', 'L81', 'L84', 'L90'] contexts=['']
+  - github_workflows_release_package_steps -> github_workflows_release_steps_run edges=9 relations=['contains'] locations=['L64', 'L66', 'L71', 'L76', 'L78', 'L80', 'L83', 'L89', 'L99'] contexts=['']
+  - github_workflows_ci_check_steps -> github_workflows_ci_steps_name edges=7 relations=['contains'] locations=['L53', 'L57', 'L59', 'L61', 'L63', 'L65', 'L71'] contexts=['']
+  - github_workflows_ci_check_steps -> github_workflows_ci_steps_run edges=7 relations=['contains'] locations=['L54', 'L58', 'L60', 'L62', 'L64', 'L66', 'L73'] contexts=['']
+  - github_workflows_release_package_steps -> github_workflows_release_steps_if edges=5 relations=['contains'] locations=['L70', 'L75', 'L82', 'L85', 'L91'] contexts=['']
+note: normal graph.json is post-build; raw producer loss must be measured earlier.

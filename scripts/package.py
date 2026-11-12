@@ -86,8 +86,11 @@ def linux_tree(stage, binary, release_version):
     component = metadata.getroot()
     repository = os.environ.get("GITHUB_REPOSITORY", "")
     if re.fullmatch(r"[\w.-]+/[\w.-]+", repository):
-        ET.SubElement(component, "url", type="homepage").text = f"https://github.com/{repository}"
-        ET.SubElement(component, "url", type="bugtracker").text = f"https://github.com/{repository}/issues"
+        for url in component.findall("url"):
+            if url.get("type") == "homepage":
+                url.text = f"https://github.com/{repository}"
+            elif url.get("type") == "bugtracker":
+                url.text = f"https://github.com/{repository}/issues"
     metadata_path = stage / f"usr/share/metainfo/{APP_ID}.metainfo.xml"
     metadata_path.parent.mkdir(parents=True)
     metadata.write(metadata_path, encoding="utf-8", xml_declaration=True)
@@ -219,7 +222,7 @@ def appimage(stage, output, release_version):
     copy(ROOT / "assets/openpaint.png", stage / "openpaint.png")
     copy(ROOT / "assets/openpaint.png", stage / ".DirIcon")
     bundle_x11_libraries(stage)
-    run("appstreamcli", "validate", "--no-net", "--override=url-homepage-missing=info", stage / f"usr/share/metainfo/{APP_ID}.metainfo.xml")
+    run("appstreamcli", "validate", "--no-net", stage / f"usr/share/metainfo/{APP_ID}.metainfo.xml")
     environment = dict(os.environ, ARCH="x86_64", VERSION=release_version)
     run(tool, "--appimage-extract-and-run", "--no-appstream", "--runtime-file", runtime, stage, output, env=environment)
     output.chmod(0o755)

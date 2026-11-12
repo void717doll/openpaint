@@ -1,10 +1,11 @@
 use crate::clipboard::{self, ImageData};
 use crate::dialogs;
-use crate::ui::{Action, Model, Ui};
+use crate::ui::{Action, Adjustment, Model, Ui};
 use macroquad::prelude::*;
 use openpaint::document::{Document, Pixel};
 use openpaint::tools::{SelectionMode, Tool, ToolSettings};
 use openpaint::{effects, io, tools};
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 
@@ -62,6 +63,7 @@ struct ClipboardJob {
 }
 struct FileDialogJob {
     save: bool,
+    import_layer: bool,
     tab: usize,
     result: Receiver<Result<Option<PathBuf>, String>>,
 }
@@ -69,11 +71,17 @@ struct EffectJob {
     tab: usize,
     label: String,
     preview: bool,
+    adjustment: Adjustment,
     result: Receiver<Result<Vec<u8>, String>>,
 }
 struct EffectPreview {
     tab: usize,
     original: Vec<u8>,
+}
+
+struct SaveAll {
+    pending: VecDeque<usize>,
+    original_tab: usize,
 }
 
 pub struct Editor {
@@ -94,6 +102,8 @@ pub struct Editor {
     file_dialog: Option<FileDialogJob>,
     effect_job: Option<EffectJob>,
     effect_preview: Option<EffectPreview>,
+    last_adjustment: Option<Adjustment>,
+    save_all: Option<SaveAll>,
     pending_close: Option<usize>,
     closing_all: bool,
     recent: Vec<PathBuf>,
@@ -133,6 +143,8 @@ impl Editor {
             file_dialog: None,
             effect_job: None,
             effect_preview: None,
+            last_adjustment: None,
+            save_all: None,
             clipboard_job: None,
             pending_close: None,
             closing_all: false,
@@ -147,6 +159,7 @@ impl Editor {
 
     pub fn frame(&mut self) {
         self.poll_jobs();
+        self.continue_save_all();
         if self.quit {
             return;
         }
@@ -171,9 +184,15 @@ impl Editor {
             zoom: self.tabs[self.active].zoom,
             status: &self.status,
             busy: self.busy(),
+            can_repeat: self.last_adjustment.is_some(),
         });
         for action in output.actions {
             if self.busy() && !matches!(action, Action::CancelEffect) {
+                continue;
+            }
+            if self.save_all.is_some()
+                && !matches!(action, Action::SavePath(_) | Action::ConfirmCancel)
+            {
                 continue;
             }
             self.finish_drag();
@@ -182,7 +201,7 @@ impl Editor {
                 return;
             }
         }
-        if !self.busy() {
+        if !self.busy() && self.save_all.is_none() {
             if !output.keyboard_captured {
                 self.shortcuts();
             }
@@ -196,13 +215,14 @@ impl Editor {
             }
         }
         if is_quit_requested() && !self.busy() {
+            self.cancel_save_all();
             self.finish_drag();
             self.cancel_effect();
             self.closing_all = true;
             self.request_close(self.active);
         }
         for file in get_dropped_files() {
-            if !self.busy() && !self.ui.has_modal() {
+            if !self.busy() && self.save_all.is_none() && !self.ui.has_modal() {
                 if let Some(path) = file.path {
                     self.open_path(path);
                 }
@@ -606,13 +626,9 @@ impl Editor {
             ),
             Tool::RectangleSelect | Tool::EllipseSelect => {
                 doc.selection = drag.selection.clone();
-                tools::select_rect(
-                    doc,
-                    (drag.start.0 as i32, drag.start.1 as i32),
-                    (end.0 as i32, end.1 as i32),
-                    drag.tool == Tool::EllipseSelect,
-                    mode,
-                );
+                let start = (drag.start.0 as i32, drag.start.1 as i32);
+                let end = tools::selection_end(start, (end.0 as i32, end.1 as i32), &self.settings);
+                tools::select_rect(doc, start, end, drag.tool == Tool::EllipseSelect, mode);
             }
             Tool::Lasso => {
                 let next = (end.0 as i32, end.1 as i32);
@@ -720,7 +736,9 @@ impl Editor {
             } else if is_key_pressed(KeyCode::O) {
                 Some(Action::Open)
             } else if is_key_pressed(KeyCode::S) {
-                Some(if shift() {
+                Some(if alt() {
+                    Action::SaveAll
+                } else if shift() {
                     Action::SaveAs
                 } else {
                     Action::Save
@@ -742,7 +760,11 @@ impl Editor {
             } else if is_key_pressed(KeyCode::I) {
                 Some(Action::InvertSelection)
             } else if is_key_pressed(KeyCode::C) {
-                Some(Action::Copy)
+                Some(if shift() {
+                    Action::CopyMerged
+                } else {
+                    Action::Copy
+                })
             } else if is_key_pressed(KeyCode::X) {
                 Some(Action::Cut)
             } else if is_key_pressed(KeyCode::V) {
@@ -755,10 +777,21 @@ impl Editor {
                 })
             } else if is_key_pressed(KeyCode::R) {
                 let doc = &self.tabs[self.active].document;
-                self.ui.show_resize(doc.width, doc.height, shift());
+                self.ui
+                    .show_resize(doc.width, doc.height, shift(), self.primary, self.secondary);
                 None
+            } else if is_key_pressed(KeyCode::B) {
+                Some(if shift() {
+                    Action::FitSelection
+                } else {
+                    Action::Fit
+                })
             } else if is_key_pressed(KeyCode::F) {
-                Some(Action::Fit)
+                Some(if shift() {
+                    Action::Flatten
+                } else {
+                    Action::RepeatEffect
+                })
             } else if is_key_pressed(KeyCode::Key0) {
                 Some(Action::ActualSize)
             } else if is_key_pressed(KeyCode::Tab) {
@@ -895,6 +928,17 @@ impl Editor {
             Action::OpenPath(path) => self.open_path(PathBuf::from(path)),
             Action::Save => self.save_current(false),
             Action::SaveAs => self.save_current(true),
+            Action::SaveAll => {
+                self.save_all = Some(SaveAll {
+                    pending: self
+                        .tabs
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, tab)| tab.document.is_dirty().then_some(index))
+                        .collect(),
+                    original_tab: self.active,
+                });
+            }
             Action::SavePath(path) => self.save_path(self.active, PathBuf::from(path)),
             Action::CloseTab(index) => self.request_close(index),
             Action::SwitchTab(index) => {
@@ -936,8 +980,9 @@ impl Editor {
                 tools::delete_selection(doc);
                 doc.finish_edit();
             }
-            Action::Copy => self.copy(false),
-            Action::Cut => self.copy(true),
+            Action::Copy => self.copy(false, false),
+            Action::CopyMerged => self.copy(false, true),
+            Action::Cut => self.copy(true, false),
             Action::Paste => self.read_clipboard(false, false),
             Action::PasteNewLayer => self.read_clipboard(true, false),
             Action::PasteNewImage => self.read_clipboard(false, true),
@@ -966,7 +1011,27 @@ impl Editor {
                     .clamp(0.05, 32.0);
                 tab.pan = Vec2::ZERO;
             }
+            Action::FitSelection => {
+                let view = self.ui.viewport();
+                let tab = &mut self.tabs[self.active];
+                if let Some((x, y, width, height)) = tab.document.selection_bounds() {
+                    tab.zoom = ((view.w - 24.0) / width as f32)
+                        .min((view.h - 24.0) / height as f32)
+                        .clamp(0.05, 32.0);
+                    tab.pan = vec2(
+                        tab.document.width as f32 / 2.0 - x as f32 - width as f32 / 2.0,
+                        tab.document.height as f32 / 2.0 - y as f32 - height as f32 / 2.0,
+                    ) * tab.zoom;
+                }
+            }
             Action::AddLayer => result = self.tabs[self.active].document.add_layer(),
+            Action::ImportLayer => {
+                self.choose_file(false);
+                if let Some(job) = &mut self.file_dialog {
+                    job.import_layer = true;
+                }
+            }
+            Action::ImportLayerPath(path) => self.import_path(self.active, PathBuf::from(path)),
             Action::DuplicateLayer => result = self.tabs[self.active].document.duplicate_layer(),
             Action::DeleteLayer => result = self.tabs[self.active].document.delete_layer(),
             Action::MergeDown => result = self.tabs[self.active].document.merge_down(),
@@ -1003,9 +1068,13 @@ impl Editor {
                 width,
                 height,
                 canvas,
+                anchor,
+                fill,
             } => {
                 result = if canvas {
-                    self.tabs[self.active].document.canvas_size(width, height)
+                    self.tabs[self.active]
+                        .document
+                        .canvas_size_with_options(width, height, anchor, fill)
                 } else {
                     self.tabs[self.active].document.resize(width, height)
                 };
@@ -1036,6 +1105,15 @@ impl Editor {
                 second,
             } => self.start_effect(name, value, second, true),
             Action::CancelEffect => self.cancel_effect(),
+            Action::Adjust {
+                adjustment,
+                preview,
+            } => self.start_adjustment(adjustment, preview),
+            Action::RepeatEffect => {
+                if let Some(adjustment) = &self.last_adjustment {
+                    self.start_adjustment(adjustment.clone(), false);
+                }
+            }
             Action::ConfirmSave => {
                 if let Some(index) = self.pending_close {
                     self.active = index;
@@ -1048,6 +1126,7 @@ impl Editor {
                 }
             }
             Action::ConfirmCancel => {
+                self.cancel_save_all();
                 self.pending_close = None;
                 self.closing_all = false;
             }
@@ -1109,10 +1188,23 @@ impl Editor {
         });
         self.file_dialog = Some(FileDialogJob {
             save,
+            import_layer: false,
             tab: self.active,
             result,
         });
         self.status = "waiting for file dialog".into();
+    }
+
+    fn import_path(&mut self, tab: usize, path: PathBuf) {
+        let result =
+            io::open(&path).and_then(|source| self.tabs[tab].document.import_layers(&source));
+        match result {
+            Ok(()) => {
+                self.tabs[tab].dirty_texture = true;
+                self.status = "imported layers".into();
+            }
+            Err(error) => self.error(error),
+        }
     }
 
     fn save_current(&mut self, choose: bool) {
@@ -1140,6 +1232,9 @@ impl Editor {
                 } else {
                     "exported image; save .opaint to preserve the complete document".into()
                 };
+                if !saved {
+                    self.cancel_save_all();
+                }
                 if saved && self.pending_close == Some(index) {
                     self.pending_close = None;
                     self.close_tab(index);
@@ -1150,9 +1245,36 @@ impl Editor {
                 }
             }
             Err(error) => {
+                self.cancel_save_all();
                 self.pending_close = None;
                 self.closing_all = false;
                 self.error(error);
+            }
+        }
+    }
+
+    fn continue_save_all(&mut self) {
+        if self.save_all.is_some() && !self.busy() && !self.ui.has_modal() {
+            let next = self
+                .save_all
+                .as_mut()
+                .and_then(|state| state.pending.pop_front());
+            if let Some(index) = next {
+                if index < self.tabs.len() {
+                    self.active = index;
+                    self.save_current(false);
+                }
+            } else {
+                self.cancel_save_all();
+                self.status = "all modified documents saved".into();
+            }
+        }
+    }
+
+    fn cancel_save_all(&mut self) {
+        if let Some(state) = self.save_all.take() {
+            if !self.tabs.is_empty() {
+                self.active = state.original_tab.min(self.tabs.len() - 1);
             }
         }
     }
@@ -1189,9 +1311,13 @@ impl Editor {
         }
     }
 
-    fn copy(&mut self, cut: bool) {
+    fn copy(&mut self, cut: bool, merged: bool) {
         let doc = &mut self.tabs[self.active].document;
-        let (width, height, pixels) = tools::selected_pixels(doc);
+        let (width, height, pixels) = if merged {
+            tools::selected_pixels_from(doc, &doc.composite())
+        } else {
+            tools::selected_pixels(doc)
+        };
         if width == 0 || height == 0 {
             return;
         }
@@ -1273,6 +1399,17 @@ impl Editor {
     }
 
     fn start_effect(&mut self, name: String, value: f32, second: f32, preview: bool) {
+        self.start_adjustment(
+            Adjustment::Basic {
+                name,
+                value,
+                second,
+            },
+            preview,
+        );
+    }
+
+    fn start_adjustment(&mut self, adjustment: Adjustment, preview: bool) {
         let doc = &self.tabs[self.active].document;
         if self.effect_preview.is_none() {
             self.effect_preview = Some(EffectPreview {
@@ -1284,21 +1421,28 @@ impl Editor {
         let width = doc.width;
         let height = doc.height;
         let (sender, result) = mpsc::channel();
-        let effect_name = name.clone();
+        let operation = adjustment.clone();
         std::thread::spawn(move || {
-            let _ = sender.send(effects::apply(
-                &pixels,
-                width,
-                height,
-                &effect_name,
-                value,
-                second,
-            ));
+            let result = match operation {
+                Adjustment::Basic {
+                    name,
+                    value,
+                    second,
+                } => effects::apply(&pixels, width, height, &name, value, second),
+                Adjustment::Levels(settings) => {
+                    effects::apply_levels(&pixels, width, height, &settings)
+                }
+                Adjustment::Curves(settings) => {
+                    effects::apply_curves(&pixels, width, height, &settings)
+                }
+            };
+            let _ = sender.send(result);
         });
         self.effect_job = Some(EffectJob {
             tab: self.active,
-            label: name,
+            label: adjustment.name().into(),
             preview,
+            adjustment,
             result,
         });
         self.status = if preview {
@@ -1335,30 +1479,38 @@ impl Editor {
         if let Some(job) = &self.file_dialog {
             if let Ok(result) = job.result.try_recv() {
                 let save = job.save;
+                let import_layer = job.import_layer;
                 let tab = job.tab;
                 self.file_dialog = None;
                 match result {
                     Ok(Some(path)) => {
                         if save {
                             self.save_path(tab, path);
+                        } else if import_layer {
+                            self.import_path(tab, path);
                         } else {
                             self.open_path(path);
                         }
                     }
                     Ok(None) => {
+                        self.cancel_save_all();
                         self.status = "cancelled".into();
                         self.pending_close = None;
                         self.closing_all = false;
                     }
                     Err(_) => {
-                        self.ui.show_path_dialog(
-                            save,
-                            if save {
-                                "Untitled.opaint".into()
-                            } else {
-                                String::new()
-                            },
-                        );
+                        if import_layer {
+                            self.ui.show_import_path();
+                        } else {
+                            self.ui.show_path_dialog(
+                                save,
+                                if save {
+                                    "Untitled.opaint".into()
+                                } else {
+                                    String::new()
+                                },
+                            );
+                        }
                         self.status = "enter an image path".into();
                     }
                 }
@@ -1369,6 +1521,7 @@ impl Editor {
                 let tab = job.tab;
                 let label = job.label.clone();
                 let preview = job.preview;
+                let adjustment = job.adjustment.clone();
                 self.effect_job = None;
                 match result {
                     Ok(pixels) => {
@@ -1400,6 +1553,7 @@ impl Editor {
                             if !preview {
                                 doc.finish_edit();
                                 self.effect_preview = None;
+                                self.last_adjustment = Some(adjustment);
                             }
                             self.tabs[tab].dirty_texture = true;
                             self.status = if preview {

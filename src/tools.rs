@@ -94,6 +94,22 @@ pub enum GradientKind {
     Radial,
     Diamond,
     Conical,
+    SpiralClockwise,
+    SpiralCounterClockwise,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GradientRepeat {
+    None,
+    Reflected,
+    Wrapped,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectionSizeMode {
+    Any,
+    FixedRatio,
+    FixedSize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -174,7 +190,11 @@ pub struct ToolSettings {
     pub filled: bool,
     pub outlined: bool,
     pub gradient: GradientKind,
+    pub gradient_repeat: GradientRepeat,
     pub selection_mode: SelectionMode,
+    pub selection_size: SelectionSizeMode,
+    pub selection_width: u32,
+    pub selection_height: u32,
     pub contiguous: bool,
 }
 impl Default for ToolSettings {
@@ -187,7 +207,11 @@ impl Default for ToolSettings {
             filled: false,
             outlined: true,
             gradient: GradientKind::Linear,
+            gradient_repeat: GradientRepeat::None,
             selection_mode: SelectionMode::Replace,
+            selection_size: SelectionSizeMode::Any,
+            selection_width: 100,
+            selection_height: 100,
             contiguous: true,
         }
     }
@@ -408,6 +432,37 @@ pub fn magic_wand(
     combine_selection(doc, mask, mode);
 }
 
+pub fn selection_end(start: (i32, i32), end: (i32, i32), settings: &ToolSettings) -> (i32, i32) {
+    if settings.selection_size == SelectionSizeMode::Any {
+        return end;
+    }
+    let mut width = settings.selection_width.max(1) as f64;
+    let mut height = settings.selection_height.max(1) as f64;
+    if settings.selection_size == SelectionSizeMode::FixedRatio {
+        if start == end {
+            return end;
+        }
+        let ratio = width / height;
+        let drag_width = (i64::from(end.0) - i64::from(start.0)).unsigned_abs() as f64 + 1.0;
+        let drag_height = (i64::from(end.1) - i64::from(start.1)).unsigned_abs() as f64 + 1.0;
+        if drag_width / drag_height >= ratio {
+            width = drag_width;
+            height = (width / ratio).round().max(1.0);
+        } else {
+            height = drag_height;
+            width = (height * ratio).round().max(1.0);
+        }
+    }
+    let dx = if end.0 < start.0 { -1 } else { 1 };
+    let dy = if end.1 < start.1 { -1 } else { 1 };
+    let x = i64::from(start.0) + (width.min(i32::MAX as f64) as i64 - 1) * dx;
+    let y = i64::from(start.1) + (height.min(i32::MAX as f64) as i64 - 1) * dy;
+    (
+        x.clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+        y.clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+    )
+}
+
 pub fn select_rect(
     doc: &mut Document,
     start: (i32, i32),
@@ -417,8 +472,8 @@ pub fn select_rect(
 ) {
     let left = start.0.min(end.0).max(0);
     let top = start.1.min(end.1).max(0);
-    let right = (start.0.max(end.0) + 1).min(doc.width as i32);
-    let bottom = (start.1.max(end.1) + 1).min(doc.height as i32);
+    let right = start.0.max(end.0).saturating_add(1).min(doc.width as i32);
+    let bottom = start.1.max(end.1).saturating_add(1).min(doc.height as i32);
     let center = (
         (start.0 as f32 + end.0 as f32 + 1.0) / 2.0,
         (start.1 as f32 + end.1 as f32 + 1.0) / 2.0,
@@ -573,6 +628,22 @@ pub fn draw_shape(
     }
 }
 
+fn repeat_gradient(t: f32, repeat: GradientRepeat) -> f32 {
+    match repeat {
+        GradientRepeat::None => t.clamp(0.0, 1.0),
+        GradientRepeat::Reflected => 1.0 - (t.rem_euclid(2.0) - 1.0).abs(),
+        GradientRepeat::Wrapped => {
+            // negative whole repeats end at the secondary stop in the reference renderer.
+            let fraction = t - t.trunc();
+            if t < 0.0 {
+                1.0 + fraction
+            } else {
+                fraction
+            }
+        }
+    }
+}
+
 pub fn gradient(
     doc: &mut Document,
     start: (f32, f32),
@@ -597,10 +668,32 @@ pub fn gradient(
                 GradientKind::Radial => px.hypot(py) / length,
                 GradientKind::Diamond => along.abs() + across.abs(),
                 GradientKind::Conical => {
-                    (py.atan2(px) - angle).rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU
+                    if settings.gradient_repeat == GradientRepeat::None {
+                        (py.atan2(px) - angle).rem_euclid(std::f32::consts::TAU)
+                            / std::f32::consts::TAU
+                    } else {
+                        let offset = (start.1 - end.1).atan2(start.0 - end.0);
+                        (py.atan2(px) - offset) / std::f32::consts::PI
+                    }
                 }
-            }
-            .clamp(0.0, 1.0);
+                GradientKind::SpiralClockwise | GradientKind::SpiralCounterClockwise => {
+                    let turn = if settings.gradient == GradientKind::SpiralClockwise {
+                        angle - py.atan2(px)
+                    } else {
+                        py.atan2(px) - angle
+                    }
+                    .rem_euclid(std::f32::consts::TAU)
+                        / std::f32::consts::TAU;
+                    // reflected spirals keep the radial distance and double the angular phase.
+                    let turns = if settings.gradient_repeat == GradientRepeat::Reflected {
+                        turn * 2.0
+                    } else {
+                        turn
+                    };
+                    px.hypot(py) / length + turns
+                }
+            };
+            let t = repeat_gradient(t, settings.gradient_repeat);
             let mut color = [0; 4];
             // interpolate premultiplied color so transparent stops do not leave dark fringes.
             let alpha = primary[3] as f32 * (1.0 - t) + secondary[3] as f32 * t;
@@ -955,6 +1048,13 @@ pub fn text(
 }
 
 pub fn selected_pixels(doc: &Document) -> (u32, u32, Vec<u8>) {
+    selected_pixels_from(doc, doc.active_pixels())
+}
+
+pub fn selected_pixels_from(doc: &Document, source_pixels: &[u8]) -> (u32, u32, Vec<u8>) {
+    if source_pixels.len() != doc.width as usize * doc.height as usize * 4 {
+        return (0, 0, Vec::new());
+    }
     let Some((x, y, width, height)) = doc.selection_bounds().or_else(|| {
         doc.selection
             .is_none()
@@ -967,7 +1067,7 @@ pub fn selected_pixels(doc: &Document) -> (u32, u32, Vec<u8>) {
         for column in 0..width as usize {
             let source = (y as usize + row) * doc.width as usize + x as usize + column;
             let target = row * width as usize + column;
-            let mut color = pixel_at(doc.active_pixels(), source);
+            let mut color = pixel_at(source_pixels, source);
             color[3] = ((color[3] as u16
                 * doc.selection.as_ref().map_or(255, |mask| mask[source]) as u16
                 + 127)
@@ -1115,6 +1215,83 @@ mod tests {
     }
 
     #[test]
+    fn fixed_selection_sizes_preserve_drag_direction_and_clip_to_canvas() {
+        let mut doc = transparent(8, 6);
+        let mut settings = ToolSettings {
+            selection_size: SelectionSizeMode::FixedSize,
+            selection_width: 6,
+            selection_height: 4,
+            ..Default::default()
+        };
+        assert_eq!(selection_end((6, 4), (6, 4), &settings), (11, 7));
+        assert_eq!(selection_end((6, 4), (5, 3), &settings), (1, 1));
+        assert_eq!(selection_end((6, 4), (7, 3), &settings), (11, 1));
+        select_rect(
+            &mut doc,
+            (6, 4),
+            selection_end((6, 4), (7, 5), &settings),
+            false,
+            SelectionMode::Replace,
+        );
+        assert_eq!(doc.selection_bounds(), Some((6, 4, 2, 2)));
+        settings.selection_width = 0;
+        settings.selection_height = 0;
+        assert_eq!(selection_end((3, 2), (0, 0), &settings), (3, 2));
+    }
+
+    #[test]
+    fn fixed_selection_ratios_follow_either_drag_axis() {
+        let mut settings = ToolSettings {
+            selection_size: SelectionSizeMode::FixedRatio,
+            selection_width: 2,
+            selection_height: 1,
+            ..Default::default()
+        };
+        assert_eq!(selection_end((10, 10), (13, 11), &settings), (13, 11));
+        assert_eq!(selection_end((10, 10), (10, 13), &settings), (17, 13));
+        assert_eq!(selection_end((10, 10), (7, 9), &settings), (7, 9));
+        assert_eq!(selection_end((10, 10), (9, 7), &settings), (3, 7));
+        assert_eq!(selection_end((10, 10), (10, 10), &settings), (10, 10));
+        settings.selection_size = SelectionSizeMode::Any;
+        assert_eq!(selection_end((10, 10), (13, 17), &settings), (13, 17));
+    }
+
+    #[test]
+    fn fixed_ellipse_clipping_preserves_the_original_shape() {
+        let mut doc = transparent(4, 4);
+        let settings = ToolSettings {
+            selection_size: SelectionSizeMode::FixedSize,
+            selection_width: 4,
+            selection_height: 4,
+            ..Default::default()
+        };
+        let start = (-2, -2);
+        select_rect(
+            &mut doc,
+            start,
+            selection_end(start, (0, 0), &settings),
+            true,
+            SelectionMode::Replace,
+        );
+        assert_eq!(
+            doc.selection.as_deref(),
+            Some([255, 255, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0].as_slice())
+        );
+    }
+
+    #[test]
+    fn merged_copy_uses_supplied_pixels_and_selection_alpha() {
+        let mut doc = Document::new(3, 1).unwrap();
+        doc.selection = Some(vec![0, 128, 255]);
+        let merged = [9, 8, 7, 255, 40, 60, 80, 128, 5, 7, 9, 0];
+        let (width, height, pixels) = selected_pixels_from(&doc, &merged);
+        assert_eq!((width, height), (2, 1));
+        assert_eq!(pixels, [40, 60, 80, 64, 0, 0, 0, 0]);
+        assert_eq!(selected_pixels_from(&doc, &[0; 4]), (0, 0, Vec::new()));
+        assert_eq!(doc.active_pixels(), &[255; 12]);
+    }
+
+    #[test]
     fn continuous_stroke_has_no_gaps() {
         let mut doc = transparent(20, 1);
         let settings = ToolSettings {
@@ -1168,6 +1345,127 @@ mod tests {
             &ToolSettings::default(),
         );
         assert_eq!(pixel_at(doc.active_pixels(), 1), [255, 0, 0, 128]);
+    }
+
+    #[test]
+    fn gradient_repetition_handles_both_sides_of_the_stops() {
+        for (repeat, expected) in [
+            (GradientRepeat::None, [0, 0, 0, 128, 255, 255, 255]),
+            (GradientRepeat::Reflected, [255, 128, 0, 128, 255, 128, 0]),
+            (GradientRepeat::Wrapped, [255, 128, 0, 128, 0, 128, 0]),
+        ] {
+            let mut doc = transparent(7, 1);
+            let settings = ToolSettings {
+                gradient_repeat: repeat,
+                ..Default::default()
+            };
+            gradient(
+                &mut doc,
+                (2.5, 0.5),
+                (4.5, 0.5),
+                [0, 0, 0, 255],
+                [255; 4],
+                &settings,
+            );
+            for (index, value) in expected.into_iter().enumerate() {
+                assert_eq!(
+                    pixel_at(doc.active_pixels(), index),
+                    [value, value, value, 255]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn spiral_directions_are_mirrored_and_reflection_keeps_radial_scale() {
+        for (kind, top, bottom) in [
+            (GradientKind::SpiralClockwise, 64, 191),
+            (GradientKind::SpiralCounterClockwise, 191, 64),
+        ] {
+            let mut doc = transparent(5, 5);
+            let mut settings = ToolSettings {
+                gradient: kind,
+                gradient_repeat: GradientRepeat::Wrapped,
+                ..Default::default()
+            };
+            gradient(
+                &mut doc,
+                (2.5, 2.5),
+                (4.5, 2.5),
+                [0, 0, 0, 255],
+                [255; 4],
+                &settings,
+            );
+            assert_eq!(pixel_at(doc.active_pixels(), 2)[0], top);
+            assert_eq!(pixel_at(doc.active_pixels(), 22)[0], bottom);
+            assert_eq!(pixel_at(doc.active_pixels(), 10)[0], 128);
+            assert_eq!(pixel_at(doc.active_pixels(), 14)[0], 0);
+            settings.gradient_repeat = GradientRepeat::Reflected;
+            gradient(
+                &mut doc,
+                (2.5, 2.5),
+                (4.5, 2.5),
+                [0, 0, 0, 255],
+                [255; 4],
+                &settings,
+            );
+            let expected = if kind == GradientKind::SpiralClockwise {
+                0
+            } else {
+                255
+            };
+            assert_eq!(pixel_at(doc.active_pixels(), 17)[0], expected);
+            assert_eq!(pixel_at(doc.active_pixels(), 14)[0], 255);
+        }
+    }
+
+    #[test]
+    fn conical_repetition_uses_the_full_sweep_between_opposite_stops() {
+        for (repeat, expected) in [
+            (GradientRepeat::None, [191, 128, 0, 64]),
+            (GradientRepeat::Reflected, [128, 0, 255, 128]),
+            (GradientRepeat::Wrapped, [128, 0, 255, 128]),
+        ] {
+            let mut doc = transparent(3, 3);
+            let settings = ToolSettings {
+                gradient: GradientKind::Conical,
+                gradient_repeat: repeat,
+                ..Default::default()
+            };
+            gradient(
+                &mut doc,
+                (1.5, 1.5),
+                (2.5, 1.5),
+                [0, 0, 0, 255],
+                [255; 4],
+                &settings,
+            );
+            for (index, value) in [1, 3, 5, 7].into_iter().zip(expected) {
+                assert_eq!(pixel_at(doc.active_pixels(), index)[0], value);
+            }
+        }
+    }
+
+    #[test]
+    fn repeated_gradient_respects_selection_and_opacity() {
+        let mut doc = transparent(3, 1);
+        doc.selection = Some(vec![0, 128, 255]);
+        let settings = ToolSettings {
+            gradient_repeat: GradientRepeat::Reflected,
+            opacity: 128,
+            ..Default::default()
+        };
+        gradient(
+            &mut doc,
+            (0.5, 0.5),
+            (1.5, 0.5),
+            [255, 0, 0, 255],
+            [0, 0, 255, 255],
+            &settings,
+        );
+        assert_eq!(pixel_at(doc.active_pixels(), 0), [0; 4]);
+        assert_eq!(pixel_at(doc.active_pixels(), 1), [0, 0, 255, 64]);
+        assert_eq!(pixel_at(doc.active_pixels(), 2), [255, 0, 0, 128]);
     }
 
     #[test]

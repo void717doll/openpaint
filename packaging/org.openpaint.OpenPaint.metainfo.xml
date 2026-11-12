@@ -8,6 +8,8 @@
   <description>
     <p>A native raster image editor with layers, selections, drawing tools, image adjustments, and undo history.</p>
   </description>
+  <url type="homepage">https://github.com/void717doll/openpaint</url>
+  <url type="bugtracker">https://github.com/void717doll/openpaint/issues</url>
   <launchable type="desktop-id">org.openpaint.OpenPaint.desktop</launchable>
   <provides>
     <binary>openpaint</binary>

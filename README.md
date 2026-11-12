@@ -13,10 +13,11 @@ the desktop build uses macroquad for the native window, input, and rendering. th
 
 - dark interface with multiple documents, recent files, dirty-close prompts, undo/redo, and history.
 - layers with visibility, names, opacity, fourteen blend modes, merging, and flattening.
-- brush, pencil, eraser, fill, five gradients, color picker, clone stamp, recolor, text, lines, rectangles, ellipses, and rounded rectangles.
+- brush, pencil, eraser, fill, seven gradient geometries with repeat modes, color picker, clone stamp, recolor, text, lines, rectangles, ellipses, and rounded rectangles.
 - rectangle, ellipse, lasso, and magic-wand selections; replace, union, subtract, intersect, and xor modes.
-- selection movement/scaling/rotation, cropped copying, pasting, document resizing, canvas resizing, cropping, flips, and rotation.
-- 27 adjustments/effects, background computation, and explicit preview/apply/cancel.
+- fixed-size and fixed-ratio selections; selection movement/scaling/rotation, cropped and merged copying, pasting, document and anchored canvas resizing, cropping, flips, and rotation.
+- 27 effects plus exposure, highlights/shadows, levels, and curves; background computation, explicit preview/apply/cancel, and repeat last adjustment.
+- import layers from supported image files and save all modified documents.
 - primary/secondary rgba colors, numeric/hex editing, document thumbnails, movable panels, zoom at the pointer, panning, and keyboard menu navigation.
 
 file dialogs use zenity/kdialog on linux, powershell's system dialogs on windows, and osascript on macos. an in-app path field is available when native dialogs cannot launch. system image clipboard integration uses xclip, powershell, or osascript; an internal clipboard remains available between openpaint documents.
@@ -40,8 +41,10 @@ png is the preferred flat export when transparency matters. metadata and icc pro
 | action | key or gesture |
 | --- | --- |
 | new / open / save / save as | ctrl+n / ctrl+o / ctrl+s / ctrl+shift+s |
+| save all | ctrl+alt+s |
 | undo / redo | ctrl+z / ctrl+y or ctrl+shift+z |
 | copy / cut / paste | ctrl+c / ctrl+x / ctrl+v |
+| copy merged | ctrl+shift+c |
 | paste into new layer / image | ctrl+shift+v / ctrl+alt+v |
 | select all / deselect / invert selection | ctrl+a / ctrl+d / ctrl+i |
 | brush / pencil / eraser | b / p / e |
@@ -59,7 +62,8 @@ png is the preferred flat export when transparency matters. metadata and icc pro
 | multiline text | shift+enter in the text dialog |
 | pan | middle drag, space+left drag, or h |
 | zoom | mouse wheel, or z and click |
-| fit / actual size | ctrl+f / ctrl+0 |
+| fit window / actual size | ctrl+b / ctrl+0 |
+| zoom to selection / repeat last adjustment | ctrl+shift+b / ctrl+f |
 | layer properties | f4 |
 | tools / history / layers / colors | f5 / f6 / f7 / f8 |
 
@@ -79,8 +83,8 @@ python3 scripts/package.py linux --format deb
 
 ## remaining parity work
 
-the original windows application could not be run in the development session. static REA findings establish the feature inventory, not visual or pixel-equivalent behavior. [reference evidence](docs/reference.md), the [parity checklist](docs/parity.md), and [architecture notes](docs/architecture.md) record that boundary.
+the original windows application could not be run in the development session. wine 10.0 is installed, but [isolated runtime tests](docs/wine-reference.md) stopped at wineserver initialization under this session's filesystem restrictions; display access is also unavailable. static REA findings establish the feature inventory, not visual or pixel-equivalent behavior. [reference evidence](docs/reference.md), the [parity checklist](docs/parity.md), and [architecture notes](docs/architecture.md) record that boundary.
 
-remaining areas include `.pdn` interoperability, paint.net plugins, the complete codec/effect/shape catalogs, full font/style support, pressure input, editable curves and gradient handles, color management, and platform accessibility. current interface placement and algorithms are implementations of the observed requirements, with no claim of pixel-perfect equivalence.
+remaining areas include `.pdn` interoperability, paint.net plugins, the complete codec/effect/shape catalogs, full font/style support, pressure input, graphical curve/gradient handles, color management, and platform accessibility. current interface placement and algorithms are implementations of observed requirements, with no claim of pixel-perfect equivalence. see the [binary audit](docs/binary-audit.md) for recovered contracts and evidence limits.
 
 license: [MIT](LICENSE). dependency and font notices: [THIRD_PARTY.md](THIRD_PARTY.md).

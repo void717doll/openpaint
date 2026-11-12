@@ -1,0 +1,170 @@
+{
+  ".github/workflows/ci.yml": {
+    "mtime": 1794375519.0055275,
+    "seen": 1794375591.4540477,
+    "ast_hash": "0ef8ee31051873a2591f9a457f65b617",
+    "semantic_hash": ""
+  },
+  ".github/workflows/release.yml": {
+    "mtime": 1793374671.40568,
+    "seen": 1794375428.248497,
+    "ast_hash": "9dca510bc206191fe973fb0fcac917c5",
+    "semantic_hash": "9dca510bc206191fe973fb0fcac917c5"
+  },
+  "Cargo.toml": {
+    "mtime": 1793375918.1755178,
+    "seen": 1794375428.2485044,
+    "ast_hash": "832f4d7f76f663538d89e338eabb7bef",
+    "semantic_hash": "832f4d7f76f663538d89e338eabb7bef"
+  },
+  "packaging/AppRun": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485092,
+    "ast_hash": "96ad7cef4980d0808b7a25506a172686",
+    "semantic_hash": "96ad7cef4980d0808b7a25506a172686"
+  },
+  "scripts/licenses.py": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485135,
+    "ast_hash": "d97cb7e2eb0ea50647795186bedc9703",
+    "semantic_hash": "d97cb7e2eb0ea50647795186bedc9703"
+  },
+  "scripts/package.py": {
+    "mtime": 1794375519.1135297,
+    "seen": 1794375591.454075,
+    "ast_hash": "0056df8cf958a44247399cb45d2c1e4f",
+    "semantic_hash": ""
+  },
+  "scripts/release.py": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485209,
+    "ast_hash": "0f4a4db58a0ca3c41f8e4bb30fc16cf7",
+    "semantic_hash": "0f4a4db58a0ca3c41f8e4bb30fc16cf7"
+  },
+  "src/app.rs": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485242,
+    "ast_hash": "3f2a62e9e56ec46522cf177b998d3cea",
+    "semantic_hash": "3f2a62e9e56ec46522cf177b998d3cea"
+  },
+  "src/clipboard.rs": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485275,
+    "ast_hash": "590099a2036e238c7c521ec612f5861f",
+    "semantic_hash": "590099a2036e238c7c521ec612f5861f"
+  },
+  "src/dialogs.rs": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485309,
+    "ast_hash": "5a8749d1134ffaf94e36524da53d83e3",
+    "semantic_hash": "5a8749d1134ffaf94e36524da53d83e3"
+  },
+  "src/document.rs": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485344,
+    "ast_hash": "d400348278fd3631f5dde9fb572fc211",
+    "semantic_hash": "d400348278fd3631f5dde9fb572fc211"
+  },
+  "src/effects.rs": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485387,
+    "ast_hash": "cf599950ac05504128d1a2d22de7ceb6",
+    "semantic_hash": "cf599950ac05504128d1a2d22de7ceb6"
+  },
+  "src/io.rs": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485416,
+    "ast_hash": "273d904eecb1f5020fce1537256d869e",
+    "semantic_hash": "273d904eecb1f5020fce1537256d869e"
+  },
+  "src/lib.rs": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.248545,
+    "ast_hash": "ff781fa60d6237f6864b4e050a318a26",
+    "semantic_hash": "ff781fa60d6237f6864b4e050a318a26"
+  },
+  "src/main.rs": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485485,
+    "ast_hash": "b38bf9ef059f5eae6a6570916ca8cead",
+    "semantic_hash": "b38bf9ef059f5eae6a6570916ca8cead"
+  },
+  "src/tools.rs": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485518,
+    "ast_hash": "acf05bbc0415aab007e3d7b6b9d27ce1",
+    "semantic_hash": "acf05bbc0415aab007e3d7b6b9d27ce1"
+  },
+  "src/ui.rs": {
+    "mtime": 1793375918.183518,
+    "seen": 1794375428.248555,
+    "ast_hash": "cca68f367416ed9bde125cc991a13bed",
+    "semantic_hash": "cca68f367416ed9bde125cc991a13bed"
+  },
+  "README.md": {
+    "mtime": 1794375104.115208,
+    "seen": 1794375428.248558,
+    "ast_hash": "86e88e5991799ca8bac3c71a99ed4eff",
+    "semantic_hash": "86e88e5991799ca8bac3c71a99ed4eff"
+  },
+  "THIRD_PARTY.md": {
+    "mtime": 1793375918.1755178,
+    "seen": 1794375428.2485616,
+    "ast_hash": "c180de02e61b3711cdd69ed2bac2b442",
+    "semantic_hash": "c180de02e61b3711cdd69ed2bac2b442"
+  },
+  "assets/DejaVuSans-LICENSE.txt": {
+    "mtime": 1793375918.1755178,
+    "seen": 1794375428.248565,
+    "ast_hash": "425865e1c534c5788b1341d401f131d9",
+    "semantic_hash": "425865e1c534c5788b1341d401f131d9"
+  },
+  "assets/ProggyClean-LICENSE.txt": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.248568,
+    "ast_hash": "4d89f845e5fb7bec7892f19776c9e747",
+    "semantic_hash": "4d89f845e5fb7bec7892f19776c9e747"
+  },
+  "docs/architecture.md": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485714,
+    "ast_hash": "56da909b4230df791ee8c88976e8c2a5",
+    "semantic_hash": "56da909b4230df791ee8c88976e8c2a5"
+  },
+  "docs/parity.md": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485757,
+    "ast_hash": "1785a17861514cea5a1b5d6417eb6886",
+    "semantic_hash": "1785a17861514cea5a1b5d6417eb6886"
+  },
+  "docs/reference.md": {
+    "mtime": 1794375104.0312157,
+    "seen": 1794375428.248579,
+    "ast_hash": "b4f90af61df04290e50828dee6a0d467",
+    "semantic_hash": "b4f90af61df04290e50828dee6a0d467"
+  },
+  "docs/releases.md": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485824,
+    "ast_hash": "c83849e574ca20a65ad4cf6bbdd3bd5a",
+    "semantic_hash": "c83849e574ca20a65ad4cf6bbdd3bd5a"
+  },
+  "docs/wine-reference.md": {
+    "mtime": 1794375065.776974,
+    "seen": 1794375428.248586,
+    "ast_hash": "50435a49527b1529d3c184dffd926785",
+    "semantic_hash": "50435a49527b1529d3c184dffd926785"
+  },
+  "assets/openpaint.png": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485893,
+    "ast_hash": "a6516a2e8f30d5bcc9539777840fd06e",
+    "semantic_hash": "a6516a2e8f30d5bcc9539777840fd06e"
+  },
+  "assets/openpaint.svg": {
+    "mtime": 1793375918.1795177,
+    "seen": 1794375428.2485926,
+    "ast_hash": "8e6c6c9998071ea7cb27c397bad66180",
+    "semantic_hash": "8e6c6c9998071ea7cb27c397bad66180"
+  }
+}

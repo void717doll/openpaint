@@ -2,6 +2,48 @@ use std::path::PathBuf;
 
 pub type Pixel = [u8; 4];
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CanvasAnchor {
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    #[default]
+    Center,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+}
+
+impl CanvasAnchor {
+    pub const ALL: [Self; 9] = [
+        Self::TopLeft,
+        Self::Top,
+        Self::TopRight,
+        Self::Left,
+        Self::Center,
+        Self::Right,
+        Self::BottomLeft,
+        Self::Bottom,
+        Self::BottomRight,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::TopLeft => "Top left",
+            Self::Top => "Top",
+            Self::TopRight => "Top right",
+            Self::Left => "Left",
+            Self::Center => "Center",
+            Self::Right => "Right",
+            Self::BottomLeft => "Bottom left",
+            Self::Bottom => "Bottom",
+            Self::BottomRight => "Bottom right",
+        }
+    }
+}
+
 pub const MAX_DIMENSION: u32 = 8_192;
 pub const MAX_PIXELS: usize = 67_108_864;
 pub const MAX_LAYERS: usize = 256;
@@ -509,6 +551,48 @@ impl Document {
         Ok(())
     }
 
+    pub fn import_layers(&mut self, source: &Document) -> Result<(), String> {
+        self.validate()?;
+        source.validate()?;
+        let width = self.width.max(source.width);
+        let height = self.height.max(source.height);
+        let length = validate_dimensions(width, height)?;
+        check_document_size(length, self.layers.len() + source.layers.len())?;
+        let pad = |layer: &Layer, old_width: u32, old_height: u32, fill: Pixel| {
+            let mut padded = layer.clone();
+            padded.pixels = vec![0; length];
+            for pixel in padded.pixels.chunks_exact_mut(4) {
+                pixel.copy_from_slice(&fill);
+            }
+            for y in 0..old_height as usize {
+                let old = y * old_width as usize * 4;
+                let new = y * width as usize * 4;
+                let row = old_width as usize * 4;
+                padded.pixels[new..new + row].copy_from_slice(&layer.pixels[old..old + row]);
+            }
+            padded
+        };
+        let mut layers: Vec<_> = self
+            .layers
+            .iter()
+            .map(|layer| pad(layer, self.width, self.height, [0; 4]))
+            .collect();
+        let imported = source.layers.iter().map(|layer| {
+            let mut layer = pad(layer, source.width, source.height, [255, 255, 255, 0]);
+            layer.name = format!("{}: {}", source.name, layer.name);
+            layer
+        });
+        layers.extend(imported);
+        self.begin_edit("Import layers");
+        self.layers = layers;
+        self.width = width;
+        self.height = height;
+        self.active_layer = self.layers.len() - 1;
+        self.selection = None;
+        self.finish_edit();
+        Ok(())
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
         self.validate()?;
         let length = validate_dimensions(width, height)?;
@@ -537,11 +621,31 @@ impl Document {
     }
 
     pub fn canvas_size(&mut self, width: u32, height: u32) -> Result<(), String> {
+        self.canvas_size_with_options(width, height, CanvasAnchor::Center, [0; 4])
+    }
+
+    pub fn canvas_size_with_options(
+        &mut self,
+        width: u32,
+        height: u32,
+        anchor: CanvasAnchor,
+        fill: Pixel,
+    ) -> Result<(), String> {
         self.validate()?;
         validate_dimensions(width, height)?;
-        let offset_x = (i64::from(width) - i64::from(self.width)) / 2;
-        let offset_y = (i64::from(height) - i64::from(self.height)) / 2;
-        self.remap("Canvas Size", width, height, |x, y| {
+        let dx = i64::from(width) - i64::from(self.width);
+        let dy = i64::from(height) - i64::from(self.height);
+        let offset_x = match anchor {
+            CanvasAnchor::TopLeft | CanvasAnchor::Left | CanvasAnchor::BottomLeft => 0,
+            CanvasAnchor::Top | CanvasAnchor::Center | CanvasAnchor::Bottom => dx / 2,
+            CanvasAnchor::TopRight | CanvasAnchor::Right | CanvasAnchor::BottomRight => dx,
+        };
+        let offset_y = match anchor {
+            CanvasAnchor::TopLeft | CanvasAnchor::Top | CanvasAnchor::TopRight => 0,
+            CanvasAnchor::Left | CanvasAnchor::Center | CanvasAnchor::Right => dy / 2,
+            CanvasAnchor::BottomLeft | CanvasAnchor::Bottom | CanvasAnchor::BottomRight => dy,
+        };
+        self.remap_filled("Canvas Size", width, height, fill, |x, y| {
             (i64::from(x) - offset_x, i64::from(y) - offset_y)
         })
     }
@@ -622,12 +726,26 @@ impl Document {
         height: u32,
         source: impl Fn(u32, u32) -> (i64, i64),
     ) -> Result<(), String> {
+        self.remap_filled(label, width, height, [0; 4], source)
+    }
+
+    fn remap_filled(
+        &mut self,
+        label: &str,
+        width: u32,
+        height: u32,
+        fill: Pixel,
+        source: impl Fn(u32, u32) -> (i64, i64),
+    ) -> Result<(), String> {
         self.validate()?;
         let length = validate_dimensions(width, height)?;
         check_document_size(length, self.layers.len())?;
         self.begin_edit(label);
         for layer in &mut self.layers {
             let mut pixels = vec![0; length];
+            for pixel in pixels.chunks_exact_mut(4) {
+                pixel.copy_from_slice(&fill);
+            }
             for y in 0..height {
                 for x in 0..width {
                     let (sx, sy) = source(x, y);

@@ -1,0 +1,24 @@
+{
+  "runs": [
+    {
+      "date": "2026-11-11T05:37:08.253111+00:00",
+      "input_tokens": null,
+      "output_tokens": null,
+      "files": 28,
+      "usage_status": "unavailable: collaboration tools did not expose usage"
+    },
+    {
+      "date": "2026-11-11T05:41:08.882941+00:00",
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "files": 2,
+      "usage_status": "code-only incremental refresh; no llm calls"
+    }
+  ],
+  "total_input_tokens": 0,
+  "total_output_tokens": 0,
+  "totals_scope": "known usage only; actual totals unavailable",
+  "unknown_usage_runs": 1,
+  "actual_total_input_tokens": null,
+  "actual_total_output_tokens": null
+}

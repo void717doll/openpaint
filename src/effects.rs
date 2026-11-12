@@ -1,5 +1,50 @@
 use crate::document::validate_dimensions;
 
+#[derive(Clone, Debug)]
+pub struct LevelsSettings {
+    pub input_black: u8,
+    pub input_white: u8,
+    pub gamma: f32,
+    pub output_black: u8,
+    pub output_white: u8,
+}
+
+impl Default for LevelsSettings {
+    fn default() -> Self {
+        Self {
+            input_black: 0,
+            input_white: 255,
+            gamma: 1.0,
+            output_black: 0,
+            output_white: 255,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CurveChannel {
+    Rgb,
+    Red,
+    Green,
+    Blue,
+    Luminosity,
+}
+
+#[derive(Clone, Debug)]
+pub struct CurvesSettings {
+    pub channel: CurveChannel,
+    pub points: Vec<(u8, u8)>,
+}
+
+impl Default for CurvesSettings {
+    fn default() -> Self {
+        Self {
+            channel: CurveChannel::Rgb,
+            points: vec![(0, 0), (255, 255)],
+        }
+    }
+}
+
 pub fn apply(
     pixels: &[u8],
     width: u32,
@@ -8,10 +53,7 @@ pub fn apply(
     value: f32,
     second: f32,
 ) -> Result<Vec<u8>, String> {
-    let length = validate_dimensions(width, height)?;
-    if pixels.len() != length {
-        return Err("effect pixel data does not match the image dimensions".into());
-    }
+    validate_pixels(pixels, width, height)?;
     if !value.is_finite() || !second.is_finite() {
         return Err("effect parameters must be finite numbers".into());
     }
@@ -47,8 +89,22 @@ pub fn apply(
             map_rgb(pixels, |rgb| adjust_hsv(rgb, hue, saturation))
         }
         "exposure" => {
-            let multiplier = 2.0f32.powf(value.clamp(-5.0, 5.0));
+            let multiplier = 2.0f32.powf(value.clamp(-200.0, 200.0) / 100.0);
             map_rgb(pixels, |rgb| rgb.map(|channel| channel * multiplier))
+        }
+        "highlights_shadows" => {
+            let highlights = value.clamp(-100.0, 100.0) / 100.0;
+            let shadows = second.clamp(-100.0, 100.0) / 100.0;
+            map_rgb(pixels, |rgb| {
+                let level = luminance(rgb) / 255.0;
+                let amount = highlights * level * level + shadows * (1.0 - level).powi(2);
+                let adjusted = if amount >= 0.0 {
+                    level + (1.0 - level) * amount
+                } else {
+                    level * (1.0 + amount)
+                };
+                set_luminance(rgb, adjusted * 255.0)
+            })
         }
         "temperature_tint" => {
             let temperature = value.clamp(-100.0, 100.0) * 0.64;
@@ -160,6 +216,136 @@ pub fn apply(
         _ => return Err(format!("unknown effect: {name}")),
     };
     Ok(result)
+}
+
+pub fn apply_levels(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    settings: &LevelsSettings,
+) -> Result<Vec<u8>, String> {
+    validate_pixels(pixels, width, height)?;
+    if settings.input_black >= settings.input_white {
+        return Err("input black must be below input white".into());
+    }
+    if settings.output_black > settings.output_white {
+        return Err("output black must not exceed output white".into());
+    }
+    if !settings.gamma.is_finite() || !(0.1..=10.0).contains(&settings.gamma) {
+        return Err("gamma must be between 0.1 and 10".into());
+    }
+    let input_range = (settings.input_white - settings.input_black) as f32;
+    let output_range = (settings.output_white - settings.output_black) as f32;
+    let mut table = [0u8; 256];
+    for (value, output) in table.iter_mut().enumerate() {
+        let normalized =
+            ((value as f32 - settings.input_black as f32) / input_range).clamp(0.0, 1.0);
+        *output = byte(
+            settings.output_black as f32 + normalized.powf(1.0 / settings.gamma) * output_range,
+        );
+    }
+    Ok(map_rgb(pixels, |rgb| {
+        rgb.map(|channel| table[channel as usize] as f32)
+    }))
+}
+
+pub fn apply_curves(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    settings: &CurvesSettings,
+) -> Result<Vec<u8>, String> {
+    validate_pixels(pixels, width, height)?;
+    let points = &settings.points;
+    if points.len() < 2 || points.len() > 256 {
+        return Err("curves require between 2 and 256 control points".into());
+    }
+    if points[0].0 != 0 || points[points.len() - 1].0 != 255 {
+        return Err("curve points must start at input 0 and end at input 255".into());
+    }
+    if points.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
+        return Err("curve inputs must be unique and in increasing order".into());
+    }
+    let table = curve_table(points);
+    Ok(map_rgb(pixels, |rgb| match settings.channel {
+        CurveChannel::Rgb => rgb.map(|channel| curve_value(&table, channel)),
+        CurveChannel::Red => [curve_value(&table, rgb[0]), rgb[1], rgb[2]],
+        CurveChannel::Green => [rgb[0], curve_value(&table, rgb[1]), rgb[2]],
+        CurveChannel::Blue => [rgb[0], rgb[1], curve_value(&table, rgb[2])],
+        CurveChannel::Luminosity => set_luminance(rgb, curve_value(&table, luminance(rgb))),
+    }))
+}
+
+fn validate_pixels(pixels: &[u8], width: u32, height: u32) -> Result<(), String> {
+    if pixels.len() != validate_dimensions(width, height)? {
+        return Err("effect pixel data does not match the image dimensions".into());
+    }
+    Ok(())
+}
+
+fn curve_table(points: &[(u8, u8)]) -> [f32; 1024] {
+    let count = points.len();
+    let mut derivatives = vec![0.0f64; count];
+    let mut right_hand = vec![0.0f64; count];
+    // natural cubic interpolation keeps the curve smooth through every control point.
+    for index in 1..count - 1 {
+        let left = (points[index].0 - points[index - 1].0) as f64;
+        let right = (points[index + 1].0 - points[index].0) as f64;
+        let weight = left / (left + right);
+        let pivot = weight * derivatives[index - 1] + 2.0;
+        let left_slope = (points[index].1 as f64 - points[index - 1].1 as f64) / left;
+        let right_slope = (points[index + 1].1 as f64 - points[index].1 as f64) / right;
+        derivatives[index] = (weight - 1.0) / pivot;
+        right_hand[index] = (6.0 * (right_slope - left_slope) / (left + right)
+            - weight * right_hand[index - 1])
+            / pivot;
+    }
+    for index in (0..count - 1).rev() {
+        derivatives[index] = derivatives[index] * derivatives[index + 1] + right_hand[index];
+    }
+    let mut table = [0.0; 1024];
+    let mut segment = 0;
+    for (index, output) in table.iter_mut().enumerate() {
+        let x = index as f64 * 255.0 / 1023.0;
+        while segment + 2 < count && x > points[segment + 1].0 as f64 {
+            segment += 1;
+        }
+        let width = (points[segment + 1].0 - points[segment].0) as f64;
+        let right = (x - points[segment].0 as f64) / width;
+        let left = 1.0 - right;
+        let value = left * points[segment].1 as f64
+            + right * points[segment + 1].1 as f64
+            + ((left * left * left - left) * derivatives[segment]
+                + (right * right * right - right) * derivatives[segment + 1])
+                * width
+                * width
+                / 6.0;
+        *output = value.clamp(0.0, 255.0) as f32;
+    }
+    table
+}
+
+fn curve_value(table: &[f32; 1024], input: f32) -> f32 {
+    let position = input.clamp(0.0, 255.0) * 1023.0 / 255.0;
+    let left = position.floor() as usize;
+    let right = (left + 1).min(1023);
+    table[left] + (table[right] - table[left]) * (position - left as f32)
+}
+
+fn set_luminance(rgb: [f32; 3], target: f32) -> [f32; 3] {
+    let source = luminance(rgb);
+    let target = target.clamp(0.0, 255.0);
+    let mut scale = 1.0f32;
+    // compress chroma only when the new brightness would put a channel outside the gamut.
+    for channel in rgb {
+        let difference = channel - source;
+        if difference < 0.0 {
+            scale = scale.min(target / -difference);
+        } else if difference > 0.0 {
+            scale = scale.min((255.0 - target) / difference);
+        }
+    }
+    rgb.map(|channel| target + (channel - source) * scale)
 }
 
 fn byte(value: f32) -> u8 {
@@ -641,6 +827,9 @@ mod tests {
             "emboss",
             "edge_detect",
             "glow",
+            "exposure",
+            "temperature_tint",
+            "highlights_shadows",
         ] {
             let result = run(&pixels, 2, 1, name, 2.0, 100.0);
             assert_eq!(result[3], 17, "{name}");
@@ -660,6 +849,9 @@ mod tests {
             ("pixelate", 1.0, 0.0),
             ("noise", 0.0, 0.0),
             ("median", 0.0, 0.0),
+            ("exposure", 0.0, 0.0),
+            ("temperature_tint", 0.0, 0.0),
+            ("highlights_shadows", 0.0, 0.0),
         ] {
             assert_eq!(run(&pixels, 2, 1, name, value, second), pixels, "{name}");
         }
@@ -728,5 +920,244 @@ mod tests {
         let first = run(&pixels, 5, 5, "noise", 20.0, 0.0);
         assert_eq!(first, run(&pixels, 5, 5, "noise", 20.0, 0.0));
         assert_ne!(first, pixels);
+    }
+
+    #[test]
+    fn exposure_uses_hundredths_and_preserves_alpha() {
+        let pixels = [20, 40, 80, 117];
+        assert_eq!(
+            run(&pixels, 1, 1, "exposure", 100.0, 0.0),
+            [40, 80, 160, 117]
+        );
+        assert_eq!(
+            run(&pixels, 1, 1, "exposure", -100.0, 0.0),
+            [10, 20, 40, 117]
+        );
+        assert_eq!(
+            run(&pixels, 1, 1, "exposure", 900.0, 0.0),
+            [80, 160, 255, 117]
+        );
+    }
+
+    #[test]
+    fn highlights_and_shadows_target_opposite_tonal_ranges() {
+        let pixels = [32, 32, 32, 91, 224, 224, 224, 230];
+        let highlights = run(&pixels, 2, 1, "highlights_shadows", -50.0, 0.0);
+        let shadows = run(&pixels, 2, 1, "highlights_shadows", 0.0, 50.0);
+        assert!(32 - highlights[0] < 224 - highlights[4]);
+        assert!(shadows[0] - 32 > shadows[4] - 224);
+        for result in [highlights, shadows] {
+            assert_eq!(result[3], 91);
+            assert_eq!(result[7], 230);
+            assert_eq!(result[0], result[1]);
+            assert_eq!(result[4], result[5]);
+        }
+    }
+
+    #[test]
+    fn levels_identity_and_gamma_preserve_alpha() {
+        let pixels: Vec<u8> = (0..=255)
+            .flat_map(|value| [value, 255 - value, value, value])
+            .collect();
+        assert_eq!(
+            apply_levels(&pixels, 256, 1, &LevelsSettings::default()).unwrap(),
+            pixels
+        );
+        let settings = LevelsSettings {
+            gamma: 2.0,
+            ..LevelsSettings::default()
+        };
+        assert_eq!(
+            apply_levels(&[0, 64, 255, 73], 1, 1, &settings).unwrap(),
+            [0, 128, 255, 73]
+        );
+    }
+
+    #[test]
+    fn levels_clip_input_and_remap_output_bounds() {
+        let settings = LevelsSettings {
+            input_black: 64,
+            input_white: 192,
+            gamma: 1.0,
+            output_black: 16,
+            output_white: 240,
+        };
+        let pixels = [0, 64, 128, 17, 192, 255, 128, 250];
+        assert_eq!(
+            apply_levels(&pixels, 2, 1, &settings).unwrap(),
+            [16, 16, 128, 17, 240, 240, 128, 250]
+        );
+        let settings = LevelsSettings {
+            output_black: 77,
+            output_white: 77,
+            ..LevelsSettings::default()
+        };
+        assert_eq!(
+            apply_levels(&pixels, 2, 1, &settings).unwrap(),
+            [77, 77, 77, 17, 77, 77, 77, 250]
+        );
+    }
+
+    #[test]
+    fn levels_reject_invalid_dimensions_ranges_and_gamma() {
+        assert!(apply_levels(&[0; 3], 1, 1, &LevelsSettings::default()).is_err());
+        assert!(apply_levels(&[], 0, 1, &LevelsSettings::default()).is_err());
+        for settings in [
+            LevelsSettings {
+                input_black: 128,
+                input_white: 128,
+                ..LevelsSettings::default()
+            },
+            LevelsSettings {
+                input_black: 200,
+                input_white: 128,
+                ..LevelsSettings::default()
+            },
+            LevelsSettings {
+                output_black: 200,
+                output_white: 128,
+                ..LevelsSettings::default()
+            },
+            LevelsSettings {
+                gamma: f32::NAN,
+                ..LevelsSettings::default()
+            },
+            LevelsSettings {
+                gamma: f32::INFINITY,
+                ..LevelsSettings::default()
+            },
+            LevelsSettings {
+                gamma: 0.0,
+                ..LevelsSettings::default()
+            },
+            LevelsSettings {
+                gamma: 10.1,
+                ..LevelsSettings::default()
+            },
+        ] {
+            assert!(apply_levels(&[0; 4], 1, 1, &settings).is_err());
+        }
+    }
+
+    #[test]
+    fn curves_identity_preserves_every_channel_and_alpha() {
+        let pixels: Vec<u8> = (0u8..=255)
+            .flat_map(|value| [value, 255 - value, value.wrapping_mul(41), value])
+            .collect();
+        for channel in [
+            CurveChannel::Rgb,
+            CurveChannel::Red,
+            CurveChannel::Green,
+            CurveChannel::Blue,
+            CurveChannel::Luminosity,
+        ] {
+            let settings = CurvesSettings {
+                channel,
+                ..CurvesSettings::default()
+            };
+            assert_eq!(
+                apply_curves(&pixels, 256, 1, &settings).unwrap(),
+                pixels,
+                "{channel:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn curves_channel_selection_and_endpoint_edits() {
+        let mut settings = CurvesSettings {
+            channel: CurveChannel::Red,
+            points: vec![(0, 255), (255, 0)],
+        };
+        let pixels = [20, 40, 80, 117];
+        assert_eq!(
+            apply_curves(&pixels, 1, 1, &settings).unwrap(),
+            [235, 40, 80, 117]
+        );
+        settings.channel = CurveChannel::Green;
+        assert_eq!(
+            apply_curves(&pixels, 1, 1, &settings).unwrap(),
+            [20, 215, 80, 117]
+        );
+        settings.channel = CurveChannel::Blue;
+        assert_eq!(
+            apply_curves(&pixels, 1, 1, &settings).unwrap(),
+            [20, 40, 175, 117]
+        );
+        settings.channel = CurveChannel::Rgb;
+        settings.points = vec![(0, 30), (255, 210)];
+        assert_eq!(
+            apply_curves(&[0, 255, 0, 117], 1, 1, &settings).unwrap(),
+            [30, 210, 30, 117]
+        );
+    }
+
+    #[test]
+    fn curves_interpolate_multiple_points_with_smooth_bends() {
+        let points = vec![(0, 0), (64, 120), (128, 64), (192, 220), (255, 255)];
+        let pixels: Vec<u8> = points
+            .iter()
+            .flat_map(|&(input, _)| [input, input, input, 83])
+            .collect();
+        let settings = CurvesSettings {
+            channel: CurveChannel::Rgb,
+            points: points.clone(),
+        };
+        let result = apply_curves(&pixels, points.len() as u32, 1, &settings).unwrap();
+        for (pixel, &(_, output)) in result.chunks_exact(4).zip(&points) {
+            assert!((pixel[0] as i16 - output as i16).abs() <= 1);
+            assert_eq!(pixel[3], 83);
+        }
+        let settings = CurvesSettings {
+            channel: CurveChannel::Rgb,
+            points: vec![(0, 0), (128, 200), (255, 255)],
+        };
+        let middle = apply_curves(&[64, 64, 64, 255], 1, 1, &settings).unwrap();
+        assert!(
+            middle[0] > 110,
+            "the segment should bend rather than use straight lines"
+        );
+    }
+
+    #[test]
+    fn luminosity_curves_retain_color_and_hit_requested_brightness() {
+        let settings = CurvesSettings {
+            channel: CurveChannel::Luminosity,
+            points: vec![(0, 128), (255, 128)],
+        };
+        let pixels = [255, 0, 0, 71, 0, 0, 255, 190, 0, 0, 0, 250];
+        let result = apply_curves(&pixels, 3, 1, &settings).unwrap();
+        for (pixel, original) in result.chunks_exact(4).zip(pixels.chunks_exact(4)) {
+            assert!(
+                (luminance([pixel[0] as f32, pixel[1] as f32, pixel[2] as f32]) - 128.0).abs()
+                    <= 1.0
+            );
+            assert_eq!(pixel[3], original[3]);
+        }
+        assert!(result[0] > result[1]);
+        assert_eq!(result[1], result[2]);
+        assert!(result[6] > result[4]);
+        assert_eq!(&result[8..12], &[128, 128, 128, 250]);
+    }
+
+    #[test]
+    fn curves_reject_missing_endpoints_and_repeated_or_unsorted_inputs() {
+        assert!(apply_curves(&[0; 3], 1, 1, &CurvesSettings::default()).is_err());
+        assert!(apply_curves(&[], 0, 1, &CurvesSettings::default()).is_err());
+        for points in [
+            vec![],
+            vec![(0, 0)],
+            vec![(1, 0), (255, 255)],
+            vec![(0, 0), (254, 255)],
+            vec![(0, 0), (128, 100), (128, 200), (255, 255)],
+            vec![(0, 0), (128, 100), (64, 200), (255, 255)],
+            vec![(0, 0); 257],
+        ] {
+            let settings = CurvesSettings {
+                channel: CurveChannel::Rgb,
+                points,
+            };
+            assert!(apply_curves(&[0; 4], 1, 1, &settings).is_err());
+        }
     }
 }

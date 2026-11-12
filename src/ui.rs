@@ -1,6 +1,9 @@
 use macroquad::prelude::*;
-use openpaint::document::{BlendMode, Document, Pixel};
-use openpaint::tools::{GradientKind, SelectionMode, Tool, ToolSettings};
+use openpaint::document::{BlendMode, CanvasAnchor, Document, Pixel};
+use openpaint::effects::{CurveChannel, CurvesSettings, LevelsSettings};
+use openpaint::tools::{
+    GradientKind, GradientRepeat, SelectionMode, SelectionSizeMode, Tool, ToolSettings,
+};
 
 const FACE: Color = color_u8!(44, 47, 51, 255);
 const PANEL: Color = color_u8!(36, 38, 42, 255);
@@ -17,6 +20,27 @@ pub(super) const CHECKER_LIGHT: Color = color_u8!(88, 93, 101, 255);
 pub(super) const CHECKER_DARK: Color = color_u8!(65, 69, 76, 255);
 
 #[derive(Clone, Debug)]
+pub enum Adjustment {
+    Basic {
+        name: String,
+        value: f32,
+        second: f32,
+    },
+    Levels(LevelsSettings),
+    Curves(CurvesSettings),
+}
+
+impl Adjustment {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Basic { name, .. } => name,
+            Self::Levels(_) => "Levels",
+            Self::Curves(_) => "Curves",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum Action {
     New {
         width: u32,
@@ -26,6 +50,7 @@ pub enum Action {
     OpenRecent(usize),
     Save,
     SaveAs,
+    SaveAll,
     OpenPath(String),
     SavePath(String),
     CloseTab(usize),
@@ -38,6 +63,7 @@ pub enum Action {
     InvertSelection,
     DeleteSelection,
     Copy,
+    CopyMerged,
     Cut,
     Paste,
     PasteNewLayer,
@@ -50,8 +76,11 @@ pub enum Action {
     ResetColors,
     Zoom(f32),
     Fit,
+    FitSelection,
     ActualSize,
     AddLayer,
+    ImportLayer,
+    ImportLayerPath(String),
     DeleteLayer,
     DuplicateLayer,
     MergeDown,
@@ -68,6 +97,8 @@ pub enum Action {
         width: u32,
         height: u32,
         canvas: bool,
+        anchor: CanvasAnchor,
+        fill: Pixel,
     },
     Crop,
     FlipHorizontal,
@@ -89,6 +120,11 @@ pub enum Action {
         second: f32,
     },
     CancelEffect,
+    Adjust {
+        adjustment: Adjustment,
+        preview: bool,
+    },
+    RepeatEffect,
     ConfirmSave,
     ConfirmDiscard,
     ConfirmCancel,
@@ -106,6 +142,7 @@ pub struct Model<'a> {
     pub zoom: f32,
     pub status: &'a str,
     pub busy: bool,
+    pub can_repeat: bool,
 }
 
 pub struct Output {
@@ -117,10 +154,19 @@ pub struct Output {
 
 enum ModalKind {
     New,
-    Resize(bool),
+    Resize {
+        canvas: bool,
+        anchor: usize,
+        fill: usize,
+        colors: [Pixel; 5],
+    },
     Layer(usize),
     Text,
     Effect(String),
+    Levels,
+    Curves,
+    SelectionSize(ToolSettings),
+    ImportPath,
     Path(bool),
     Color(bool),
     Confirm,
@@ -178,6 +224,8 @@ enum MenuCommand {
     Properties,
     Text,
     Effect(&'static str, f32, f32),
+    Levels,
+    Curves,
     Panel(usize),
     About,
     Separator,
@@ -421,10 +469,22 @@ impl Ui {
             ],
         ));
     }
-    pub fn show_resize(&mut self, width: u32, height: u32, canvas: bool) {
+    pub fn show_resize(
+        &mut self,
+        width: u32,
+        height: u32,
+        canvas: bool,
+        primary: Pixel,
+        secondary: Pixel,
+    ) {
         self.set_modal(Modal::new(
             if canvas { "Canvas Size" } else { "Resize" },
-            ModalKind::Resize(canvas),
+            ModalKind::Resize {
+                canvas,
+                anchor: 0,
+                fill: 0,
+                colors: [[0; 4], primary, secondary, [255; 4], [0, 0, 0, 255]],
+            },
             &[
                 ("Width (pixels)", width.to_string()),
                 ("Height (pixels)", height.to_string()),
@@ -463,6 +523,42 @@ impl Ui {
             fields.push((next, second.to_string()));
         }
         self.set_modal(Modal::new(title, ModalKind::Effect(name.into()), &fields));
+    }
+    fn show_levels(&mut self) {
+        self.set_modal(Modal::new(
+            "Levels",
+            ModalKind::Levels,
+            &[
+                ("Input black (0–254)", "0".into()),
+                ("Input white (1–255)", "255".into()),
+                ("Gamma (0.1–10)", "1".into()),
+                ("Output black (0–255)", "0".into()),
+                ("Output white (0–255)", "255".into()),
+            ],
+        ));
+    }
+    fn show_curves(&mut self) {
+        self.set_modal(Modal::new(
+            "Curves",
+            ModalKind::Curves,
+            &[
+                (
+                    "Channel: rgb, red, green, blue, or luminosity",
+                    "rgb".into(),
+                ),
+                (
+                    "Control points (x:y, …; x and y from 0 to 255)",
+                    "0:0, 255:255".into(),
+                ),
+            ],
+        ));
+    }
+    pub fn show_import_path(&mut self) {
+        self.set_modal(Modal::new(
+            "Import From File",
+            ModalKind::ImportPath,
+            &[("File path", String::new())],
+        ));
     }
     pub fn show_confirm(&mut self, message: &str) {
         let mut modal = Modal::new("Unsaved changes", ModalKind::Confirm, &[]);
@@ -809,6 +905,8 @@ impl Ui {
                 (GradientKind::Radial, "Radial"),
                 (GradientKind::Diamond, "Diamond"),
                 (GradientKind::Conical, "Conical"),
+                (GradientKind::SpiralClockwise, "Spiral CW"),
+                (GradientKind::SpiralCounterClockwise, "Spiral CCW"),
             ] {
                 let width = menu_width(label);
                 if button(
@@ -821,6 +919,61 @@ impl Ui {
                     changed = true;
                 }
                 x += width + 2.0;
+            }
+            let label = match settings.gradient_repeat {
+                GradientRepeat::None => "No repeat",
+                GradientRepeat::Reflected => "Repeat reflected",
+                GradientRepeat::Wrapped => "Repeat wrapped",
+            };
+            if button(Rect::new(x, 68.0, 135.0, 25.0), label, false, interactive) {
+                settings.gradient_repeat = match settings.gradient_repeat {
+                    GradientRepeat::None => GradientRepeat::Reflected,
+                    GradientRepeat::Reflected => GradientRepeat::Wrapped,
+                    GradientRepeat::Wrapped => GradientRepeat::None,
+                };
+                changed = true;
+            }
+            x += 144.0;
+        }
+        if matches!(model.tool, Tool::RectangleSelect | Tool::EllipseSelect) {
+            let label = match settings.selection_size {
+                SelectionSizeMode::Any => "Any size",
+                SelectionSizeMode::FixedRatio => "Fixed ratio",
+                SelectionSizeMode::FixedSize => "Fixed size",
+            };
+            if button(Rect::new(x, 68.0, 100.0, 25.0), label, false, interactive) {
+                settings.selection_size = match settings.selection_size {
+                    SelectionSizeMode::Any => SelectionSizeMode::FixedRatio,
+                    SelectionSizeMode::FixedRatio => SelectionSizeMode::FixedSize,
+                    SelectionSizeMode::FixedSize => SelectionSizeMode::Any,
+                };
+                changed = true;
+            }
+            if settings.selection_size != SelectionSizeMode::Any
+                && button(
+                    Rect::new(x + 106.0, 68.0, 115.0, 25.0),
+                    &format!(
+                        "{} × {}…",
+                        settings.selection_width, settings.selection_height
+                    ),
+                    false,
+                    interactive,
+                )
+            {
+                self.set_modal(Modal::new(
+                    label,
+                    ModalKind::SelectionSize(settings.clone()),
+                    &[
+                        (
+                            "Width (pixels or ratio)",
+                            settings.selection_width.to_string(),
+                        ),
+                        (
+                            "Height (pixels or ratio)",
+                            settings.selection_height.to_string(),
+                        ),
+                    ],
+                ));
             }
         }
         if matches!(
@@ -1472,13 +1625,15 @@ impl Ui {
                 match item.command {
                     MenuCommand::Action(action) => actions.push(action),
                     MenuCommand::New => self.show_new(800, 600),
-                    MenuCommand::Resize(canvas) => self.show_resize(model.doc.width, model.doc.height, canvas),
+                    MenuCommand::Resize(canvas) => self.show_resize(model.doc.width, model.doc.height, canvas, model.primary, model.secondary),
                     MenuCommand::Properties => self.show_layer_properties(model.doc),
                     MenuCommand::Text => self.show_text(),
                     MenuCommand::Effect(name, value, second) => {
                         if effect_labels(name).1.is_empty() { actions.push(Action::Effect { name: name.into(), value, second }); }
                         else { self.show_effect(name, value, second); }
                     }
+                    MenuCommand::Levels => self.show_levels(),
+                    MenuCommand::Curves => self.show_curves(),
                     MenuCommand::Panel(panel) => self.panels[panel] = !self.panels[panel],
                     MenuCommand::About => self.show_message("openpaint 0.1.0\n\na native rust image editor.\n\noriginal open-source implementation. paint.net compatibility remains incomplete; see docs/parity.md.\n\nMIT license · openpaint contributors"),
                     MenuCommand::Separator => {}
@@ -1506,6 +1661,8 @@ impl Ui {
                     M::separator(),
                     M::action("Save", "Ctrl+S", Action::Save),
                     M::action("Save As…", "Ctrl+Shift+S", Action::SaveAs),
+                    M::action("Save All", "Ctrl+Alt+S", Action::SaveAll)
+                        .disabled(!model.tabs.iter().any(|(_, dirty)| *dirty)),
                     M::separator(),
                 ];
                 for (index, path) in self.recent.iter().take(8).enumerate() {
@@ -1532,6 +1689,7 @@ impl Ui {
                 M::separator(),
                 M::action("Cut", "Ctrl+X", Action::Cut),
                 M::action("Copy", "Ctrl+C", Action::Copy),
+                M::action("Copy Merged", "Ctrl+Shift+C", Action::CopyMerged),
                 M::action("Paste", "Ctrl+V", Action::Paste),
                 M::action(
                     "Paste into New Layer",
@@ -1550,6 +1708,8 @@ impl Ui {
                 M::action("Zoom Out", "−", Action::Zoom(model.zoom / 1.25)),
                 M::action("Actual Size", "Ctrl+0", Action::ActualSize),
                 M::action("Zoom to Window", "Ctrl+B", Action::Fit),
+                M::action("Zoom to Selection", "Ctrl+Shift+B", Action::FitSelection)
+                    .disabled(model.doc.selection_bounds().is_none()),
             ],
             3 => vec![
                 M::new("Resize…", "Ctrl+R", C::Resize(false)),
@@ -1566,6 +1726,7 @@ impl Ui {
             ],
             4 => vec![
                 M::action("Add New Layer", "Ctrl+Shift+N", Action::AddLayer),
+                M::action("Import From File…", "", Action::ImportLayer),
                 M::action("Delete Layer", "", Action::DeleteLayer)
                     .disabled(model.doc.layers.len() == 1),
                 M::action("Duplicate Layer", "Ctrl+Shift+D", Action::DuplicateLayer),
@@ -1601,6 +1762,13 @@ impl Ui {
                 M::new("Invert Alpha", "", C::Effect("invert_alpha", 0.0, 0.0)),
                 M::new("Exposure…", "", C::Effect("exposure", 0.0, 0.0)),
                 M::new(
+                    "Highlights / Shadows…",
+                    "",
+                    C::Effect("highlights_shadows", 0.0, 0.0),
+                ),
+                M::new("Levels…", "", C::Levels),
+                M::new("Curves…", "", C::Curves),
+                M::new(
                     "Temperature / Tint…",
                     "",
                     C::Effect("temperature_tint", 0.0, 0.0),
@@ -1609,6 +1777,9 @@ impl Ui {
                 M::new("Sepia", "", C::Effect("sepia", 0.0, 0.0)),
             ],
             6 => vec![
+                M::action("Repeat Last Adjustment", "Ctrl+F", Action::RepeatEffect)
+                    .disabled(!model.can_repeat),
+                M::separator(),
                 M::new("Gaussian Blur…", "", C::Effect("gaussian_blur", 2.0, 0.0)),
                 M::new("Motion Blur…", "", C::Effect("motion_blur", 10.0, 0.0)),
                 M::new("Zoom Blur…", "", C::Effect("zoom_blur", 20.0, 0.0)),
@@ -1677,7 +1848,9 @@ impl Ui {
         } else {
             message_lines.len() as f32 * 19.0 + 12.0
         };
-        let extra = if matches!(modal.kind, ModalKind::Layer(_)) {
+        let extra = if matches!(modal.kind, ModalKind::Resize { canvas: true, .. }) {
+            74.0
+        } else if matches!(modal.kind, ModalKind::Layer(_)) {
             39.0
         } else {
             0.0
@@ -1761,6 +1934,39 @@ impl Ui {
                 *mode = (*mode + 1) % BlendMode::ALL.len();
             }
         }
+        if let ModalKind::Resize {
+            canvas: true,
+            ref mut anchor,
+            ref mut fill,
+            ..
+        } = modal.kind
+        {
+            text("Anchor", r.x + 19.0, y + 7.0, 13.0, INK);
+            if button(
+                Rect::new(r.x + 150.0, y - 11.0, 290.0, 27.0),
+                CanvasAnchor::ALL[*anchor].name(),
+                false,
+                !busy,
+            ) {
+                *anchor = (*anchor + 1) % CanvasAnchor::ALL.len();
+            }
+            text("Fill", r.x + 19.0, y + 42.0, 13.0, INK);
+            let fills = [
+                "Transparent",
+                "Primary color",
+                "Secondary color",
+                "White",
+                "Black",
+            ];
+            if button(
+                Rect::new(r.x + 150.0, y + 24.0, 290.0, 27.0),
+                fills[*fill],
+                false,
+                !busy,
+            ) {
+                *fill = (*fill + 1) % fills.len();
+            }
+        }
         clipped_text(
             &modal.error,
             r.x + 18.0,
@@ -1773,7 +1979,11 @@ impl Ui {
         let enter = !busy
             && !(multiline && self.focus == Some(0) && shift_down())
             && (is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::KpEnter));
-        let can_cancel = !busy || matches!(modal.kind, ModalKind::Effect(_));
+        let adjustment_dialog = matches!(
+            modal.kind,
+            ModalKind::Effect(_) | ModalKind::Levels | ModalKind::Curves
+        );
+        let can_cancel = !busy || adjustment_dialog;
         let escape = can_cancel && is_key_pressed(KeyCode::Escape);
         if matches!(modal.kind, ModalKind::Confirm) {
             if button(
@@ -1821,7 +2031,7 @@ impl Ui {
                 return;
             }
         } else {
-            if matches!(modal.kind, ModalKind::Effect(_))
+            if adjustment_dialog
                 && button(
                     Rect::new(r.x + 18.0, button_y, 90.0, 27.0),
                     "Preview",
@@ -1839,6 +2049,10 @@ impl Ui {
                         value,
                         second,
                     }),
+                    Ok(Action::Adjust { adjustment, .. }) => actions.push(Action::Adjust {
+                        adjustment,
+                        preview: true,
+                    }),
                     Err(error) => modal.error = error,
                     _ => {}
                 }
@@ -1846,7 +2060,7 @@ impl Ui {
             let label = match modal.kind {
                 ModalKind::Path(true) => "Save",
                 ModalKind::Path(false) => "Open",
-                ModalKind::Effect(_) => "Apply",
+                ModalKind::Effect(_) | ModalKind::Levels | ModalKind::Curves => "Apply",
                 _ => "OK",
             };
             if button(
@@ -1872,7 +2086,7 @@ impl Ui {
                 can_cancel,
             ) || escape
             {
-                if matches!(modal.kind, ModalKind::Effect(_)) {
+                if adjustment_dialog {
                     actions.push(Action::CancelEffect);
                 } else if matches!(modal.kind, ModalKind::Path(_)) {
                     actions.push(Action::ConfirmCancel);
@@ -1915,12 +2129,96 @@ fn modal_action(modal: &Modal) -> Result<Action, String> {
             let (width, height) = dimensions()?;
             Ok(Action::New { width, height })
         }
-        ModalKind::Resize(canvas) => {
+        ModalKind::Resize {
+            canvas,
+            anchor,
+            fill,
+            colors,
+        } => {
             let (width, height) = dimensions()?;
             Ok(Action::Resize {
                 width,
                 height,
                 canvas: *canvas,
+                anchor: CanvasAnchor::ALL[*anchor],
+                fill: colors[*fill],
+            })
+        }
+        ModalKind::SelectionSize(settings) => {
+            let (width, height) = dimensions()?;
+            let mut settings = settings.clone();
+            settings.selection_width = width;
+            settings.selection_height = height;
+            Ok(Action::Settings(settings))
+        }
+        ModalKind::ImportPath => {
+            if value(0).is_empty() {
+                return Err("enter a file path".into());
+            }
+            Ok(Action::ImportLayerPath(value(0).into()))
+        }
+        ModalKind::Levels => {
+            let channel = |index| {
+                value(index)
+                    .parse::<u8>()
+                    .map_err(|_| "levels must be whole numbers from 0 to 255".to_string())
+            };
+            let settings = LevelsSettings {
+                input_black: channel(0)?,
+                input_white: channel(1)?,
+                gamma: number(2)?,
+                output_black: channel(3)?,
+                output_white: channel(4)?,
+            };
+            if settings.input_black >= settings.input_white
+                || settings.output_black > settings.output_white
+                || !(0.1..=10.0).contains(&settings.gamma)
+            {
+                return Err(
+                    "use increasing input levels, ordered output levels, and gamma from 0.1 to 10"
+                        .into(),
+                );
+            }
+            Ok(Action::Adjust {
+                adjustment: Adjustment::Levels(settings),
+                preview: false,
+            })
+        }
+        ModalKind::Curves => {
+            let channel = match value(0).to_ascii_lowercase().as_str() {
+                "rgb" => CurveChannel::Rgb,
+                "red" => CurveChannel::Red,
+                "green" => CurveChannel::Green,
+                "blue" => CurveChannel::Blue,
+                "luminosity" => CurveChannel::Luminosity,
+                _ => return Err("choose rgb, red, green, blue, or luminosity".into()),
+            };
+            let mut points = Vec::new();
+            for point in value(1).split(',') {
+                let (x, y) = point
+                    .trim()
+                    .split_once(':')
+                    .ok_or("write each curve point as x:y")?;
+                let coordinate = |s: &str| {
+                    s.trim()
+                        .parse::<u8>()
+                        .map_err(|_| "curve coordinates must be whole numbers from 0 to 255")
+                };
+                points.push((coordinate(x)?, coordinate(y)?));
+            }
+            if points.len() < 2
+                || points.len() > 256
+                || points[0].0 != 0
+                || points.last().unwrap().0 != 255
+                || points.windows(2).any(|pair| pair[0].0 >= pair[1].0)
+            {
+                return Err(
+                    "use ordered points from x=0 to x=255 without duplicate x values".into(),
+                );
+            }
+            Ok(Action::Adjust {
+                adjustment: Adjustment::Curves(CurvesSettings { channel, points }),
+                preview: false,
             })
         }
         ModalKind::Layer(mode) => {
@@ -2020,7 +2318,12 @@ fn effect_labels(name: &str) -> (&'static str, &'static str, &'static str) {
         "auto_levels" => ("Auto-Level", "", ""),
         "emboss" => ("Emboss", "", ""),
         "invert_alpha" => ("Invert Alpha", "", ""),
-        "exposure" => ("Exposure", "Stops (−5 to 5)", ""),
+        "exposure" => ("Exposure", "Exposure (−200 to 200; 100 = one stop)", ""),
+        "highlights_shadows" => (
+            "Highlights / Shadows",
+            "Highlights (−100 to 100)",
+            "Shadows (−100 to 100)",
+        ),
         "temperature_tint" => (
             "Temperature / Tint",
             "Temperature (−100 to 100)",

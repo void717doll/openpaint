@@ -6,16 +6,16 @@ reference sources and REA evidence are recorded in [reference.md](reference.md).
 
 | area | implemented | remaining differences |
 | --- | --- | --- |
-| shell/documents | native window, menus with keyboard navigation, thumbnail tabs, recent files, movable utility panels, close prompts | tab reordering, save-all, persistent panel positions, measured geometry/themes, accessibility |
-| viewport/colors | pointer-centered wheel zoom, actual size/fit, pan, palette, rgba and hex, primary/secondary sampling | rulers, pixel grid, color wheel, fit selection, complete reference zoom/scroll semantics |
+| shell/documents | native window, menus with keyboard navigation, thumbnail tabs, recent files, movable utility panels, close prompts, save-all | tab reordering, persistent panel positions, measured geometry/themes, accessibility |
+| viewport/colors | pointer-centered wheel zoom, actual size/fit/fit-selection, pan, palette, rgba and hex, primary/secondary sampling | rulers, pixel grid, color wheel, complete reference zoom/scroll semantics |
 | drawing | continuous brush/pencil/eraser, width/hardness/opacity, selection clipping, secondary color | pressure, spacing, path smoothing, gamma settings, exact stroke coverage |
-| selections/transforms | four selection tools, five combination modes, move pixels/outline, corner scaling, right-drag rotation, constrained transforms, nudge | fixed-size/ratio selections, editable transform numeric controls, exact reference interpolation |
-| gradients/shapes | five gradients; line, rectangle, ellipse, rounded rectangle; outline/fill and constraints | spirals, repetition, editable gradient/curve handles, complete shapes, caps/dashes |
+| selections/transforms | four selection tools, five combination modes, fixed-size/ratio selections, move pixels/outline, corner scaling, right-drag rotation, constrained transforms, nudge | editable transform numeric controls, exact reference interpolation |
+| gradients/shapes | seven gradient geometries and repeat modes; line, rectangle, ellipse, rounded rectangle; outline/fill and constraints | editable gradient/curve handles, complete shapes, caps/dashes |
 | clone/recolor/text | clone source, tolerance replacement, bundled font, size, multiline text and unicode field editing | font chooser, styles/alignment, movable text before commit, reference clone alignment modes |
-| layers/history | fourteen blend modes, layer operations/properties, undo/redo, history navigation, dirty revisions | layer import command, reference rounding/gamma verification, exact operation grouping |
-| image transforms | premultiplied bilinear resize, centered canvas resize, crop, flips, quarter-turns | filter selector, canvas anchor/fill controls, aspect-lock controls |
-| clipboard | cut/copy/paste, paste into layer/image, selection alpha, native helper integration | copy-merged command, native clipboard validation on each host |
-| adjustments/effects | 27 implemented functions, selected-region application, asynchronous explicit preview/apply/cancel | complete reference catalog and parameters, curves/levels controls, repeat-last, automatic preview |
+| layers/history | fourteen blend modes, layer import, operations/properties, undo/redo, history navigation, dirty revisions | reference rounding/gamma verification, exact operation grouping |
+| image transforms | premultiplied bilinear resize, anchored/fill canvas resize, crop, flips, quarter-turns | filter selector, aspect-lock controls |
+| clipboard | cut/copy/copy-merged/paste, paste into layer/image, selection alpha, native helper integration | native clipboard validation on each host |
+| adjustments/effects | 27 implemented effects plus exposure, highlights/shadows, levels, and curves; selected-region application, asynchronous preview/apply/cancel, repeat-last | complete reference catalog and parameters, exact GPU/color numerical match, graphical curves, automatic preview |
 | files | bounded `.opaint` projects; png/bmp/tga/ico/pnm saving; webp/dds import; safe atomic saves | `.pdn`, jpeg/gif/tiff/avif/heic/jxl, icc/metadata, export-quality dialogs |
 | plugins | none | managed/GPU plugin host and ABI compatibility |
 | packaging | all requested workflows/scripts; actual linux deb built and extracted | hosted jobs, rpm/AppImage tooling runs, windows/mac native packaging, installation/uninstallation and signing |
@@ -49,9 +49,11 @@ reference sources and REA evidence are recorded in [reference.md](reference.md).
 | platform integration | dialogs, clipboard, file associations, open-with, icons, printing/scanning where applicable | not compared |
 | packaging | install/run/uninstall each deb, rpm, AppImage, windows x64, macos arm64, and macos x64 artifact | requires platform-specific validation |
 
-automated tests should verify openpaint's own invariants even before the original application is available. passing those tests does not change the reference-comparison column. retain discrepancies until a matching scenario proves them resolved.
+local checks verify openpaint's own invariants even before the original application is available. passing those checks does not change the reference-comparison column. retain discrepancies until a matching scenario proves them resolved.
 
 ## local verification
+
+on 2026-11-11, `cargo fmt --all -- --check`, `cargo check --offline --locked --all-targets`, and `git diff --check` passed after the REA-guided parity changes. the test suite was not rerun during this pass.
 
 on 2026-10-30, `cargo fmt --all -- --check`, `cargo clippy --offline --locked --all-targets -- -D warnings`, all 52 tests, and `cargo build --offline --locked --release` passed. tests cover alpha/compositing, selections and transforms, undo/savepoints, corrupted projects and failed saves, effect previews/cancellation, dirty-close handling, and unicode/menu editing helpers.
 

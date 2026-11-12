@@ -1,5 +1,7 @@
 # reference investigation
 
+the feature-to-implementation mapping and retained REA evidence ids are summarized in the [binary audit](binary-audit.md).
+
 the supplied installer was inspected statically on linux. no paint.net process was executed, no original application screenshots were captured, and no behavioral or pixel-level equivalence has been established.
 
 ## artifact identity
@@ -96,7 +98,7 @@ the [official shortcut documentation](https://paint.net/doc/latest/KeyboardMouse
 
 these pages are older documentation, not observation of the supplied 5.1.12 executable. exact spacing, window dimensions, icons, default values, interaction timing, and rendered pixels remain unmeasured. the documentation screenshot was accessible through the web tool, but a local download failed because shell DNS access was unavailable.
 
-the current linux environment has no wine executable. the coordinator's display probe could not open `:0`, so local GUI inspection is also unavailable in this session.
+wine 10.0 is now installed. on 2026-11-10, isolated launches of both the installer and the fully extracted application stopped before startup because wineserver could not create `/run/user/1000/wine` on the restricted filesystem. display `:0` also remained inaccessible. [wine test records](wine-reference.md) document the attempts, retained logs, and reproduction commands; no original-application functionality has been verified yet.
 
 ## remaining evidence work
 
